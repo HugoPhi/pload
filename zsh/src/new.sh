@@ -3,10 +3,10 @@ fnew() {
     
     if [[ -z $v ]]; then  # 如果没有指定版本
         if [[ -z $m ]]; then
-            VENV_NEW=$(python --version | awk '{print $2}')
+            VENV_NEW=$(python3 --version | awk '{print $2}')
         else
             out="${m// /_}"  # 将空格替换为'_'
-            VENV_NEW=$(python --version | awk '{print $2}')
+            VENV_NEW=$(python3 --version | awk '{print $2}')
             VENV_NEW="$VENV_NEW-$out"
         fi
     else

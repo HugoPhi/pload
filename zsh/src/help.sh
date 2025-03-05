@@ -60,8 +60,8 @@ fhelp() {
         echo ""
         echo "・None: 列出所有全局虚拟环境名称"
         echo "・'-s(earch)': 列出所有全局虚拟环境名称完整包含该参数"
-    elif [[ "$h" == "setup" ]]; then
-        echo "pload setup"
+    elif [[ "$h" == "." ]]; then
+        echo "pload ."
         echo ""
         echo "激活当前目录的.venv环境."
         echo ""
@@ -75,7 +75,7 @@ fhelp() {
         echo "・rm   : 删除全局虚拟环境"
         echo "・clone: 克隆虚拟环境"
         echo "・list : 列出所有全局虚拟环境名称"
-        echo "・setup: 加载当前目录下的 .venv"
+        echo "・.    : 加载当前目录下的 .venv"
     fi
     
     return 0

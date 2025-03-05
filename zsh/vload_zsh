@@ -5,7 +5,7 @@
 # 设置全局变量
 VENV_DIR="$HOME/.venvs"
 PYENV_PYTHON="$HOME/.pyenv"
-PLOAD_PATH="$HOME/.local/bin/vload/zsh"
+MODULE_PATH="$HOME/.local/bin/vload/zsh/src"
 
 # 初始化命令行参数 non_option_args=()
 v=""
@@ -89,17 +89,17 @@ option="${non_option_args[1]}"
 # echo "b2 is: $b2"
 
 # 加载功能函数
-source "$PLOAD_PATH/src/setup.sh"
-source "$PLOAD_PATH/src/utils.sh"
-source "$PLOAD_PATH/src/list.sh"
-source "$PLOAD_PATH/src/new.sh"
-source "$PLOAD_PATH/src/rm.sh"
-source "$PLOAD_PATH/src/clone.sh"
-source "$PLOAD_PATH/src/help.sh"
-source "$PLOAD_PATH/src/init.sh"
+source "$MODULE_PATH/setup.sh"
+source "$MODULE_PATH/utils.sh"
+source "$MODULE_PATH/list.sh"
+source "$MODULE_PATH/new.sh"
+source "$MODULE_PATH/rm.sh"
+source "$MODULE_PATH/clone.sh"
+source "$MODULE_PATH/help.sh"
+source "$MODULE_PATH/init.sh"
 
 # 检查选项和参数
-if [[ "$option" == "setup" ]]; then
+if [[ "$option" == "." ]]; then
     fsetup
 elif [[ "$option" == "list" ]]; then
     flist

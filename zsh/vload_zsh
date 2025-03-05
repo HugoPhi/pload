@@ -96,6 +96,7 @@ source "$PLOAD_PATH/src/new.sh"
 source "$PLOAD_PATH/src/rm.sh"
 source "$PLOAD_PATH/src/clone.sh"
 source "$PLOAD_PATH/src/help.sh"
+source "$PLOAD_PATH/src/init.sh"
 
 # 检查选项和参数
 if [[ "$option" == "setup" ]]; then
@@ -106,6 +107,8 @@ elif [[ "$option" == "new" ]]; then
     fnew
 elif [[ "$option" == "rm" ]]; then
     frm
+elif [[ "$option" == "init" ]]; then
+    finit
 elif [[ "$option" == "clone" ]]; then
     fclone
 elif [[ "$option" == "" || -n $h ]]; then 

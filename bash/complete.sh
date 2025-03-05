@@ -5,14 +5,14 @@ export PATH="$HOME/.local/bin/vload/bash/:$PATH"
 
 # python 虚拟环境自动补全函数
 _pload_complete() {
-    local cur prev opts venvs pyenv_versions new_opts clone_opts entered_opts remaining_opts
+    local cur prev opts venvs pyenv_versions new_opts clone_opts entered_opts remaining_opts init_opts
 
     # 获取当前输入和之前输入的命令
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
     # 定义基本的 pload 子命令
-    opts="new rm clone list setup -h"
+    opts="new rm clone list setup init -h"
 
     # 获取全局虚拟环境列表
     venvs=$(ls -1 ~/.venvs 2>/dev/null)
@@ -23,6 +23,7 @@ _pload_complete() {
     # 定义各子命令的选项
     new_opts="-m -f -u -v"
     clone_opts="-c -p -b -v"
+    init_opts="-v -f -u"
     
     message="pytorch tensorflow normal game expirement"
 
@@ -46,17 +47,22 @@ _pload_complete() {
 
     # 动态确定剩余的补全选项
     case "${COMP_WORDS[1]}" in
-        new)
-            # 如果之前的选项是 -v，补全 pyenv 版本
+        new|init)
             if [[ "${prev}" == "-v" ]]; then
                 COMPREPLY=( $(compgen -W "${pyenv_versions}" -- "${cur}") )
-            elif [[ "${prev}" == "-m" ]]; then
+            elif [[ "${prev}" == "-m" && "${COMP_WORDS[1]}" == "new" ]]; then
                 COMPREPLY=( $(compgen -W ".venv ${message}" -- "${cur}") )
             else
-                # 获取剩余选项（从 new_opts 中移除已使用的选项）
-                remaining_opts=$(echo "${new_opts}" | sed -E "s/(${entered_opts// /|})//g")
+                # 根据命令选择相应的选项集
+                opts_set=${new_opts}
+                if [[ "${COMP_WORDS[1]}" == "init" ]]; then
+                    opts_set=${init_opts}
+                fi
                 
-                # 为 `pload new` 提供剩余选项补全
+                # 获取剩余选项（从 opts_set 中移除已使用的选项）
+                remaining_opts=$(echo "${opts_set}" | sed -E "s/(${entered_opts// /|})//g")
+                
+                # 为 `pload new/init` 提供剩余选项补全
                 COMPREPLY=( $(compgen -W "${remaining_opts} ${venvs}" -- "${cur}") )
             fi
             ;;

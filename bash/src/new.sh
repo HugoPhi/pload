@@ -40,9 +40,9 @@ fnew() {
         
         if [[ -z $v ]]; then
             if [[ -z $f ]]; then
-                python -m venv "$VENV_DIR/$VENV_NEW"
+                python3 -m venv "$VENV_DIR/$VENV_NEW"
             else
-                python -m venv "$VENV_DIR/$VENV_NEW" && source "$VENV_DIR/$VENV_NEW"/bin/activate && pip install -r $f && deactivate
+                python3 -m venv "$VENV_DIR/$VENV_NEW" && source "$VENV_DIR/$VENV_NEW"/bin/activate && pip install -r $f && deactivate
             fi
         else
             if [[ -z $f ]]; then

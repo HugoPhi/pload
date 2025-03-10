@@ -1,20 +1,21 @@
-# 🐍 Python Virtual Environment Loader
+# pload: Python Virtual Environment Loader
 
-`python_venv_loader` 是一个 Bash 脚本工具，用于简化 Python 虚拟环境的管理。通过直观的命令行界面，用户可以轻松创建、删除、克隆和列出虚拟环境。
+`python_venv_loader` 是一个 Bash 脚本工具，旨在简化 Python 虚拟环境的管理。通过命令行界面，用户可以高效地创建、删除、克隆和列出虚拟环境。
 
-## 🚀 功能
+## # 功能概述
 
-- **创建虚拟环境** (`new`): 使用当前 Python 版本或指定版本创建新的虚拟环境。
+- **创建全局虚拟环境** (`new`): 使用当前 Python 版本或指定版本创建新的全局虚拟环境，存放于 `~/.venvs/` 目录。
+- **创建项目虚拟环境** (`init`): 使用当前 Python 版本或指定版本创建新的虚拟环境，存放于当前目录。
 - **删除虚拟环境** (`rm`): 删除指定的全局虚拟环境，支持正则表达式匹配。
 - **克隆虚拟环境** (`clone`): 在全局和局部环境之间克隆虚拟环境，或在两个全局环境之间克隆。
 - **列出虚拟环境** (`list`): 列出所有可用的全局虚拟环境。
-- **激活虚拟环境** (`setup`): 激活当前目录下的虚拟环境。
+- **激活虚拟环境** (`.`): 激活当前目录下的虚拟环境。
 
-## 🛠️ 安装
+## # 安装指南
 
 ### 1. 安装 `pyenv`
 
-在使用 `python_venv_loader` 之前，请先确保安装并配置好 `pyenv`，用于管理和切换不同的 Python 版本。
+在使用 `python_venv_loader` 之前，请确保已安装并配置好 `pyenv`，用于管理和切换不同的 Python 版本。
 
 **安装 `pyenv`：**
 
@@ -51,9 +52,9 @@
 
 该脚本将自动安装必要的依赖项并配置环境。
 
-## 💻 使用方法
+## # 使用说明
 
-### 📖 基本用法
+### 基本用法
 
 - **全局创建虚拟环境**
   ```bash
@@ -73,8 +74,21 @@
     ```
 
 - **本地创建虚拟环境**
+  ```bash
+  pload init -v [python版本]
+  ```
+  - `-v`: 指定 Python 版本。
 
-和全局创建是基本一样的，只是没有'-m'参数，本地环境只有'.venv'名称，而且会在当前目录下创建。
+  **说明**
+  - 该命令会在当前目录下创建一个名为 `.venv` 的虚拟环境。
+  - 与全局创建虚拟环境不同，本地创建的环境不会添加用途描述 (`-m` 参数无效)。
+  - 本地虚拟环境适用于项目级别的隔离，便于与项目代码一起管理。
+
+  **示例**
+  - 在当前目录下创建 Python 3.8.19 的虚拟环境：
+    ```bash
+    pload init -v 3.8.19
+    ```
 
 - **删除虚拟环境**
   ```bash
@@ -126,18 +140,10 @@
   ```
   激活当前目录下的 `.venv` 环境。
 
-## ⚙️ 自动补全
+## # 自动补全
 
-该脚本支持 Bash 自动补全功能，能够为命令和参数提供建议，简化操作。
+该脚本支持 Bash/Zsh 自动补全功能，并提供man文档。
 
-## 📜 许可
+## License
 
-本项目基于 [MIT License](LICENSE)。
-
-## 🌟 贡献
-
-欢迎贡献代码！请查看 [CONTRIBUTING.md](CONTRIBUTING.md) 获取更多信息。
-
----
-
-感谢你使用 `python_venv_loader`！如果有任何问题或建议，欢迎在 [Issues](https://github.com/HugoPhi/python_venv_loader/issues) 页面反馈。😊
+> This project is licensed under the terms of the MIT. See LICENSE for more details.

@@ -1,8 +1,7 @@
 #!/bin/bash
 
-git clone https://github.com/HugoPhi/python_venv_loader.git $HOME/.local/bin/vload
+git clone https://github.com/HugoPhi/pload.git $HOME/.local/bin/vload
 
-chmod +x $HOME/.local/bin/vload/vload
 
 ## 添加man
 # 将 man 手册页文件复制到系统的 man 手册路径中
@@ -32,8 +31,10 @@ echo ""
 current_shell=$(basename "$SHELL")
 
 if [ "$current_shell" = "bash" ]; then
+    chmod +x $HOME/.local/bin/vload/bash/vload
     echo 'source $HOME/.local/bin/vload/bash/main.sh' >> ~/.bashrc
 elif [ "$current_shell" = "zsh" ]; then
+    chmod +x $HOME/.local/bin/vload/zsh/vload
     echo 'source $HOME/.local/bin/vload/zsh/main.zsh' >> ~/.zshrc
 else
     echo "当前终端是 $current_shell."

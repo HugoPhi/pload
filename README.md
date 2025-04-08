@@ -46,7 +46,7 @@
 
 - 运行以下命令以下载并运行安装脚本：
     ```bash
-    curl -O https://raw.githubusercontent.com/HugoPhi/python_venv_loader/main/install.sh
+    curl -O https://raw.githubusercontent.com/HugoPhi/pload/main/install.sh
     bash install.sh
     ```
 

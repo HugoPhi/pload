@@ -2,8 +2,8 @@ import os
 import re
 import argparse
 import argcomplete
-from pload.utils import Colors
-from pload.cmds import (
+from src.utils import Colors
+from src.cmds import (
     create_venv, remove_venv, set_venv,
     get_venvs, get_python_versions, rdvenv
 )
@@ -126,7 +126,7 @@ def main():
             print(f'[!] you can only activate {Colors.red("one venv once")}. But get: {all}')
             exit(1)
 
-    argcomplete.autocomplete(parser)
+    argcomplete.autocomplete(parser)  # 添加补全
     args = parser.parse_known_args()[0]
 
     if all[0] == 'new':
@@ -225,12 +225,13 @@ def main():
         print(f'[*] {Colors.green("Virtual envs")} managed by pload:')
         print()
 
-        if CUR is not None and CUR[0] == '.':
-            print(f' >  {Colors.yellow(CUR)}')
+        if CUR is not None:
+            if CUR[0] == '.':
+                print(f' >  {Colors.yellow(CUR)}')
 
-        if os.path.exists(os.path.join(os.getcwd(), '.venv')):
-            if CUR[9:] != os.path.join(os.getcwd(), '.venv'):
-                print(f'    local -> {os.path.join(os.getcwd(), ".venv")}')
+            if os.path.exists(os.path.join(os.getcwd(), '.venv')):
+                if CUR[9:] != os.path.join(os.getcwd(), '.venv'):
+                    print(f'    local -> {os.path.join(os.getcwd(), ".venv")}')
 
         for venv in get_venvs():
             if venv == CUR:

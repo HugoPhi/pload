@@ -14,8 +14,9 @@ if sys.platform == 'win32':
     pyenv_exe = os.path.join(pyenv_path, 'bin', 'pyenv.bat')
     pyenv_versions = os.path.join(pyenv_path, 'versions')
 elif sys.platform == 'linux':
-    home = os.environ.get('HOME')
-    pyenv_path = os.path.join(home, '/.pyenv/bin')
+    # home = os.environ.get('HOME')
+    home = os.path.expanduser("~")
+    pyenv_path = os.path.join(home, '.pyenv')
     pyenv_exe = os.path.join(pyenv_path, 'bin', 'pyenv')
     pyenv_versions = os.path.join(pyenv_path, 'versions')
 
@@ -88,19 +89,28 @@ def set_venv(venv_name='.'):
         if is_local:
             where = os.path.join(os.getcwd(), '.venv')
 
-            if not os.path.exists(os.path.join(os.getcwd(), '.venv', 'script', 'sh')):
-                os.makedirs(os.path.join(os.getcwd(), '.venv', 'script', 'sh'))
+            if not os.path.exists(where):
+                print('[!] local venv is not created, please create it first.')
+                exit(1)
+
+            if not os.path.exists(os.path.join(venv_path, 'script', 'sh')):
+                os.makedirs(os.path.join(venv_path, 'script', 'sh'))
 
             wrvenv('CUR', f'.venv -> {where}')
-            shutil.copy(os.path.join(where, 'bin', 'activate'), os.path.join(os.getcwd(), '.venv', 'script', 'sh', 'activate'))
+            shutil.copy(os.path.join(where, 'bin', 'activate'), os.path.join(venv_path, 'script', 'sh', 'activate'))
         else:
             where = os.path.join(venv_path, venv_name)
+
+            if venv_name not in get_venvs():
+                print(f'[!] venv: "{venv_name}" is not created, please create it first.')
+                exit(1)
 
             if not os.path.exists(os.path.join(venv_path, 'script', 'sh')):
                 os.makedirs(os.path.join(venv_path, 'script', 'sh'))
 
             wrvenv('CUR', venv_name)
             shutil.copy(os.path.join(where, 'bin', 'activate'), os.path.join(venv_path, 'script', 'sh', 'activate'))
+
 
 
 def remove_venv(venv_name):
@@ -132,17 +142,19 @@ def remove_venv(venv_name):
         if is_local:
             where = os.path.join(os.getcwd(), '.venv')
 
-            if not os.path.exists(os.path.join(os.getcwd(), '.venv', 'script', 'sh')):
-                os.makedirs(os.path.join(os.getcwd(), '.venv', 'script', 'sh'))
+            if not os.path.exists(where):
+                print('[!] local venv is not created, can not remove.')
+                exit(1)
 
-            shutil.copy(os.path.join(where, 'bin', 'activate'), os.path.join(os.getcwd(), '.venv', 'script', 'sh', 'activate'))
+            shutil.rmtree(where)
         else:
             where = os.path.join(venv_path, venv_name)
 
-            if not os.path.exists(os.path.join(venv_path, 'script', 'sh')):
-                os.makedirs(os.path.join(venv_path, 'script', 'sh'))
+            if venv_name not in get_venvs():
+                print(f'[!] venv: "{venv_name}" is not created, can not remove.')
+                exit(1)
 
-            shutil.copy(os.path.join(where, 'bin', 'activate'), os.path.join(venv_path, 'script', 'sh', 'activate'))
+            shutil.rmtree(where)
 
 
 def create_venv(version, requirements=None, channel=None, message='normal', is_local=False):
@@ -167,7 +179,10 @@ def create_venv(version, requirements=None, channel=None, message='normal', is_l
                 exit(1)
 
     '''process of create venv.'''
-    python_exe = os.path.join(pyenv_versions, version, 'python.exe' if sys.platform == 'win32' else 'python')
+    if sys.platform == 'win32':
+        python_exe = os.path.join(pyenv_versions, version, 'python.exe')
+    elif sys.platform == 'linux':
+        python_exe = os.path.join(pyenv_versions, version, 'bin', 'python')
 
     if is_local:  # check exsits
         target_path = os.path.join(os.getcwd(), '.venv')
@@ -199,7 +214,12 @@ def create_venv(version, requirements=None, channel=None, message='normal', is_l
         ch = f"-i {channel}" if channel is not None else ""
         print(f'[*] pip install {req} {ch}')
         # print(requirements)
-        pip_exe = os.path.join(target_path, 'Scripts', 'pip.exe' if sys.platform == 'win32' else 'pip')
+
+        if sys.platform == 'win32':
+            pip_exe = os.path.join(target_path, 'Scripts', 'pip.exe')
+        elif sys.platform == 'linux':
+            pip_exe = os.path.join(target_path, 'bin', 'pip')
+            
         command = [pip_exe, 'install', *requirements] + (['-i', channel] if channel is not None else [])
         # print(f'pip: {command}')
 

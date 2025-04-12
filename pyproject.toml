@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pload"
+version = "0.1.0"
+description = "A simple command line tool for python virtual env management."
+authors = [{name = "Yunming Hu", email = "hugonelsonm3@gmail.com"}]
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = [
+    "colorama",
+    "argcomplete"
+]
+
+[project.scripts]
+pload = "pload.cli:main"
+
+[tool.setuptools.packages]
+find = {}

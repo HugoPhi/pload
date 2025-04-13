@@ -8,7 +8,7 @@ class PostInstallCommand(install):
 
 setup(
     name="pload",
-    version="0.1.0",
+    version="0.1.1",
     description="A simple command line tool for python virtual env management.",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
@@ -20,12 +20,13 @@ setup(
         "colorama",
         "argcomplete",
     ],
+    packages=find_packages(where="src"),  # 自动发现包
+    package_dir={"": "src"},              # 包根目录为 src
     entry_points={
         "console_scripts": [
-            "pload = src.cli:main",
+            "pload = pload.cli:main",
         ],
     },
-    packages=find_packages(),
     # cmdclass={
     #     "install": PostInstallCommand
     # },

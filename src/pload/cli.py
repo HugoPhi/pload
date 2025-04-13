@@ -2,8 +2,8 @@ import os
 import re
 import argparse
 import argcomplete
-from src.utils import Colors
-from src.cmds import (
+from pload.utils import Colors
+from pload.cmds import (
     create_venv, remove_venv, set_venv,
     get_venvs, get_python_versions, rdvenv
 )

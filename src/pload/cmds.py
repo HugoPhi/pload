@@ -4,7 +4,7 @@ import sys
 import re
 import subprocess
 from pathlib import Path
-from .utils import Colors
+from pload.utils import Colors
 
 venv_path = os.path.join(os.path.expanduser("~"), 'venvs')
 

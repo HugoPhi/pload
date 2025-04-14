@@ -2,6 +2,9 @@
 
 A Minimalist Python Virtual Environment Management Tool, support powershell, bash, zsh, fishshell.
 
+> [!WARNING]
+> This is project is under development yet. You can try it carefully if you are interested in it.
+
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 ## Overview

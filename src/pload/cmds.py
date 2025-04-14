@@ -48,8 +48,8 @@ def get_venvs():
 
     venvs = [name for name in os.listdir(venv_path) if os.path.isdir(os.path.join(venv_path, name))]
 
-    if 'script' in venvs:
-        venvs.remove('script')
+    if 'scripts' in venvs:
+        venvs.remove('scripts')
 
     return venvs
 
@@ -66,12 +66,7 @@ def set_venv(venv_name='.'):
                 print('[!] local venv is not created, please create it first.')
                 exit(1)
 
-            if not os.path.exists(os.path.join(venv_path, 'script', 'cmd')):
-                os.makedirs(os.path.join(venv_path, 'script', 'cmd'))
-
             wrvenv('CUR', f'.venv -> {where}')
-            # shutil.copy(os.path.join(where, 'Scripts', 'activate.bat'), os.path.join(venv_path, 'script', 'cmd', 'activate.bat'))  # This operation depricated from v0.2.0
-            # shutil.copy(os.path.join(where, 'Scripts', 'deactivate.bat'), os.path.join(venv_path, 'script', 'cmd', 'deactivate.bat'))
         else:
             where = os.path.join(venv_path, venv_name)
 
@@ -79,12 +74,7 @@ def set_venv(venv_name='.'):
                 print(f'[!] venv: "{venv_name}" is not created, please create it first.')
                 exit(1)
 
-            if not os.path.exists(os.path.join(venv_path, 'script', 'cmd')):
-                os.makedirs(os.path.join(venv_path, 'script', 'cmd'))
-
             wrvenv('CUR', venv_name)
-            # shutil.copy(os.path.join(where, 'Scripts', 'activate.bat'), os.path.join(venv_path, 'script', 'cmd', 'activate.bat'))
-            # shutil.copy(os.path.join(where, 'Scripts', 'deactivate.bat'), os.path.join(venv_path, 'script', 'cmd', 'deactivate.bat'))
     elif sys.platform == 'linux':
         if is_local:
             where = os.path.join(os.getcwd(), '.venv')
@@ -93,11 +83,7 @@ def set_venv(venv_name='.'):
                 print('[!] local venv is not created, please create it first.')
                 exit(1)
 
-            if not os.path.exists(os.path.join(venv_path, 'script', 'sh')):
-                os.makedirs(os.path.join(venv_path, 'script', 'sh'))
-
             wrvenv('CUR', f'.venv -> {where}')
-            # shutil.copy(os.path.join(where, 'bin', 'activate'), os.path.join(venv_path, 'script', 'sh', 'activate'))
         else:
             where = os.path.join(venv_path, venv_name)
 
@@ -105,11 +91,7 @@ def set_venv(venv_name='.'):
                 print(f'[!] venv: "{venv_name}" is not created, please create it first.')
                 exit(1)
 
-            if not os.path.exists(os.path.join(venv_path, 'script', 'sh')):
-                os.makedirs(os.path.join(venv_path, 'script', 'sh'))
-
             wrvenv('CUR', venv_name)
-            # shutil.copy(os.path.join(where, 'bin', 'activate'), os.path.join(venv_path, 'script', 'sh', 'activate'))
 
 
 def remove_venv(venv_name):

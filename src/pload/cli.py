@@ -76,7 +76,7 @@ def main():
     # rm 子命令
     rm_subparser = subparsers.add_parser('rm', help='Remove virtual envs.')
     rm_subparser.add_argument(
-        '--envs', '-e', nargs='+',
+        '--envs', '-n', nargs='+',
         help='envs to remove'
     )
     rm_subparser.add_argument(

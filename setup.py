@@ -58,15 +58,15 @@ class PostInstallCommand(install):
                     print(f"[!] {script_name} already added to {config_path}. Skipping.")
                     continue
 
-            with open(config_path, "a") as f:
-                if shell == "fish":
-                    f.write(f"\nsource {script_path}\n")
-                elif shell == "ps1":
-                    f.write(f'\n. "{script_path}"\n')
-                else:
-                    f.write(f'\nsource "{script_path}"\n')
+                with open(config_path, "a") as f:
+                    if shell == "fish":
+                        f.write(f"\nsource {script_path}\n")
+                    elif shell == "ps1":
+                        f.write(f'\n. "{script_path}"\n')
+                    else:
+                        f.write(f'\nsource "{script_path}"\n')
 
-            print(f"[*] Added {script_name} to {config_path}")
+                print(f"[*] Added {script_name} to {config_path}")
 
 
 setup(
@@ -83,8 +83,8 @@ setup(
         "colorama",
         "argcomplete",
     ],
-    packages=find_packages(where="src"),  # 自动发现包
-    package_dir={"": "src"},              # 包根目录为 src
+    packages=find_packages(where="src"),
+    package_dir={"": "src"},
     entry_points={
         "console_scripts": [
             "python_virtual_env_load = pload.cli:main",

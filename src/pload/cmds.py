@@ -14,7 +14,6 @@ if sys.platform == 'win32':
     pyenv_exe = os.path.join(pyenv_path, 'bin', 'pyenv.bat')
     pyenv_versions = os.path.join(pyenv_path, 'versions')
 elif sys.platform == 'linux':
-    # home = os.environ.get('HOME')
     home = os.path.expanduser("~")
     pyenv_path = os.path.join(home, '.pyenv')
     pyenv_exe = os.path.join(pyenv_path, 'bin', 'pyenv')
@@ -181,7 +180,6 @@ def create_venv(version, requirements=None, channel=None, message='normal', is_l
             print(f'[*] Creating env: {Colors.green(version + "-" + trimed_message)} -> {Colors.green(target_path)}')
 
     command = [python_exe, '-m', 'venv', target_path]
-    # print(f'create: {command}')
     create_process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
     create_process.wait()
@@ -194,7 +192,6 @@ def create_venv(version, requirements=None, channel=None, message='normal', is_l
 
         ch = f"-i {channel}" if channel is not None else ""
         print(f'[*] pip install {req} {ch}')
-        # print(requirements)
 
         if sys.platform == 'win32':
             pip_exe = os.path.join(target_path, 'Scripts', 'pip.exe')
@@ -202,7 +199,6 @@ def create_venv(version, requirements=None, channel=None, message='normal', is_l
             pip_exe = os.path.join(target_path, 'bin', 'pip')
 
         command = [pip_exe, 'install', *requirements] + (['-i', channel] if channel is not None else [])
-        # print(f'pip: {command}')
 
         package_process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         for line in iter(package_process.stdout.readline, ''):

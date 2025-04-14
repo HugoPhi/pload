@@ -126,7 +126,7 @@ def main():
             print(f'[!] you can only activate {Colors.red("one venv once")}. But get: {all}')
             exit(1)
 
-    argcomplete.autocomplete(parser)  # 添加补全
+    argcomplete.autocomplete(parser)
     args = parser.parse_known_args()[0]
 
     if all[0] == 'new':

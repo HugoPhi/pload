@@ -7,9 +7,9 @@ pload() {
 
     python_virtual_env_load "${args[@]}"
 
-    if [ ${#args[@]} -eq 1 ] && [ "${args[0]}" = "." ]; then
+    if [ "${args[1]}" = '.' ]; then
         local venvActivatePath=".venv/bin/activate"
-        
+
         if [ -f "$venvActivatePath" ]; then
             echo "[*] Activating virtual environment at: $(pwd)/$venvActivatePath"
             source "$venvActivatePath"

@@ -7,9 +7,9 @@ pload() {
 
     python_virtual_env_load "${args[@]}"
 
-    if [ ${#args[@]} -eq 1 ] && [ "${args[0]}" = "." ]; then
+    if [ "${args[1]}" = '.' ]; then
         local venvActivatePath=".venv/bin/activate"
-        
+
         if [ -f "$venvActivatePath" ]; then
             echo "[*] Activating virtual environment at: $(pwd)/$venvActivatePath"
             source "$venvActivatePath"
@@ -21,7 +21,7 @@ pload() {
 
     if [ ${#args[@]} -eq 1 ]; then
         local param="${args[0]}"
-        
+
         if [[ ! " ${support_cmds[@]} " =~ " ${param} " ]]; then
             local activatePath="$userRoot/venvs/$param/bin/activate"
             if [ -f "$activatePath" ]; then

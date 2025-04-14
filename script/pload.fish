@@ -5,6 +5,8 @@ function pload
 
     set args $argv
 
+    python_virtual_env_load $args
+
     if test (count $args) -eq 1 -a "$args[1]" = "."
         set venvActivatePath ".venv/bin/activate"
 
@@ -16,10 +18,6 @@ function pload
         end
         return
     end
-
-    echo "Executing: pload $args"
-    
-    python_virtual_env_load $args
 
     if test (count $args) -eq 1
         set param $args[1]

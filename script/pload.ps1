@@ -4,6 +4,12 @@ function pload {
         [string[]]$args
     )
 
+    $support_cmds = @('new', 'init', 'rm', 'cp', 'list', '-h')
+
+    $userRoot = $env:USERPROFILE
+
+    # Write-Host "Executing: pload $($args -join ' ')" -ForegroundColor Yellow
+    python_virtual_env_load @args
 
     # handle '.'
     if ($args.Count -eq 1 -and $args[0] -eq ".") {
@@ -18,14 +24,6 @@ function pload {
         }
         return
     }
-
-
-    $support_cmds = @('new', 'init', 'rm', 'cp', 'list', '-h')
-
-    $userRoot = $env:USERPROFILE
-
-    # Write-Host "Executing: pload $($args -join ' ')" -ForegroundColor Yellow
-    python_virtual_env_load @args
 
     if ($args.Count -eq 1) {
         $param = $args[0]

@@ -5,6 +5,8 @@ pload() {
 
     local args=("$@")
 
+    python_virtual_env_load "${args[@]}"
+
     if [ ${#args[@]} -eq 1 ] && [ "${args[0]}" = "." ]; then
         local venvActivatePath=".venv/bin/activate"
         
@@ -16,8 +18,6 @@ pload() {
         fi
         return
     fi
-
-    python_virtual_env_load "${args[@]}"
 
     if [ ${#args[@]} -eq 1 ]; then
         local param="${args[0]}"

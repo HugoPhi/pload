@@ -1,5 +1,5 @@
 pload() {
-    local support_cmds=("new" "init" "rm" "cp" "list")
+    local support_cmds=("new" "init" "rm" "cp" "list" "-h")
 
     local userRoot="$HOME"
 

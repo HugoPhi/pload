@@ -4,7 +4,7 @@ function pload {
         [string[]]$args
     )
 
-    $support_cmds = @('new', 'init', 'rm', 'cp', 'list')
+    $support_cmds = @('new', 'init', 'rm', 'cp', 'list', '-h')
 
     $userRoot = $env:USERPROFILE
 

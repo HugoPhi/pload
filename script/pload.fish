@@ -1,5 +1,5 @@
 function pload
-    set support_cmds new init rm cp list
+    set support_cmds new init rm cp list -h
 
     set userRoot $HOME
 

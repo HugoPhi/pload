@@ -10,7 +10,7 @@ venv_path = os.path.join(os.path.expanduser("~"), 'venvs')
 
 '''platform: windows, linux'''
 if sys.platform == 'win32':
-    pyenv_path = os.environ.get('PYENV')
+    pyenv_path = os.environ.get('PYENV_HOME')
     pyenv_exe = os.path.join(pyenv_path, 'bin', 'pyenv.bat')
     pyenv_versions = os.path.join(pyenv_path, 'versions')
 elif sys.platform == 'linux':
@@ -70,8 +70,8 @@ def set_venv(venv_name='.'):
                 os.makedirs(os.path.join(venv_path, 'script', 'cmd'))
 
             wrvenv('CUR', f'.venv -> {where}')
-            shutil.copy(os.path.join(where, 'Scripts', 'activate.bat'), os.path.join(venv_path, 'script', 'cmd', 'activate.bat'))
-            shutil.copy(os.path.join(where, 'Scripts', 'deactivate.bat'), os.path.join(venv_path, 'script', 'cmd', 'deactivate.bat'))
+            # shutil.copy(os.path.join(where, 'Scripts', 'activate.bat'), os.path.join(venv_path, 'script', 'cmd', 'activate.bat'))  # This operation depricated from v0.2.0
+            # shutil.copy(os.path.join(where, 'Scripts', 'deactivate.bat'), os.path.join(venv_path, 'script', 'cmd', 'deactivate.bat'))
         else:
             where = os.path.join(venv_path, venv_name)
 
@@ -83,8 +83,8 @@ def set_venv(venv_name='.'):
                 os.makedirs(os.path.join(venv_path, 'script', 'cmd'))
 
             wrvenv('CUR', venv_name)
-            shutil.copy(os.path.join(where, 'Scripts', 'activate.bat'), os.path.join(venv_path, 'script', 'cmd', 'activate.bat'))
-            shutil.copy(os.path.join(where, 'Scripts', 'deactivate.bat'), os.path.join(venv_path, 'script', 'cmd', 'deactivate.bat'))
+            # shutil.copy(os.path.join(where, 'Scripts', 'activate.bat'), os.path.join(venv_path, 'script', 'cmd', 'activate.bat'))
+            # shutil.copy(os.path.join(where, 'Scripts', 'deactivate.bat'), os.path.join(venv_path, 'script', 'cmd', 'deactivate.bat'))
     elif sys.platform == 'linux':
         if is_local:
             where = os.path.join(os.getcwd(), '.venv')
@@ -97,7 +97,7 @@ def set_venv(venv_name='.'):
                 os.makedirs(os.path.join(venv_path, 'script', 'sh'))
 
             wrvenv('CUR', f'.venv -> {where}')
-            shutil.copy(os.path.join(where, 'bin', 'activate'), os.path.join(venv_path, 'script', 'sh', 'activate'))
+            # shutil.copy(os.path.join(where, 'bin', 'activate'), os.path.join(venv_path, 'script', 'sh', 'activate'))
         else:
             where = os.path.join(venv_path, venv_name)
 
@@ -109,8 +109,7 @@ def set_venv(venv_name='.'):
                 os.makedirs(os.path.join(venv_path, 'script', 'sh'))
 
             wrvenv('CUR', venv_name)
-            shutil.copy(os.path.join(where, 'bin', 'activate'), os.path.join(venv_path, 'script', 'sh', 'activate'))
-
+            # shutil.copy(os.path.join(where, 'bin', 'activate'), os.path.join(venv_path, 'script', 'sh', 'activate'))
 
 
 def remove_venv(venv_name):
@@ -219,7 +218,7 @@ def create_venv(version, requirements=None, channel=None, message='normal', is_l
             pip_exe = os.path.join(target_path, 'Scripts', 'pip.exe')
         elif sys.platform == 'linux':
             pip_exe = os.path.join(target_path, 'bin', 'pip')
-            
+
         command = [pip_exe, 'install', *requirements] + (['-i', channel] if channel is not None else [])
         # print(f'pip: {command}')
 
@@ -281,7 +280,7 @@ def rdvenv(key):
 
 if __name__ == '__main__':
     # install_python("3.")
-    # print(get_python_versions())
+    print(get_python_versions())
     # create_venv('3.9.8', message='torch', is_local=True)
-    set_venv('.')
+    # set_venv('.')
     # remove_venv('.')

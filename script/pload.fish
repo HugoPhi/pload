@@ -5,7 +5,20 @@ function pload
 
     set args $argv
 
+    if test (count $args) -eq 1 -a "$args[1]" = "."
+        set venvActivatePath ".venv/bin/activate"
+
+        if test -f $venvActivatePath
+            echo "[*] Activating virtual environment at: (pwd)/$venvActivatePath"
+            source $venvActivatePath
+        else
+            echo "Error: No virtual environment found in the current directory's .venv folder."
+        end
+        return
+    end
+
     echo "Executing: pload $args"
+    
     python_virtual_env_load $args
 
     if test (count $args) -eq 1
@@ -14,7 +27,7 @@ function pload
         if not contains -- $param $support_cmds
             set activatePath "$userRoot/venvs/$param/bin/activate"
             if test -f $activatePath
-                echo "Activating virtual environment at: $activatePath"
+                echo "[*] Activating virtual environment at: $activatePath"
                 source $activatePath
             else
                 echo "Error: The specified path does not exist: $activatePath"

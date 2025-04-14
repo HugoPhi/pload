@@ -1,6 +1,6 @@
 # pload
 
-A Minimalist Python Virtual Environment Management Tool
+A Minimalist Python Virtual Environment Management Tool, support powershell, bash, zsh, fishshell.
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
@@ -113,4 +113,4 @@ python setup.py develop
 
 ## License
 
-> Apache License 2.0, Copyright 2025 Yunming Hu
+> Apache License 2.0, Copyright 2025 Yunming Hu.

@@ -1,5 +1,5 @@
 import subprocess
-from pload.utils import Colors
+from pload.managers.color import Colors
 
 
 class DependencyManager:

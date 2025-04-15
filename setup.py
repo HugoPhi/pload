@@ -71,7 +71,7 @@ class PostInstallCommand(install):
 
 setup(
     name="pload",
-    version="0.2.0",
+    version="0.3.0",
     description="A simple command line tool for python virtual env management.",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",

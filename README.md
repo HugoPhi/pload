@@ -1,5 +1,13 @@
 # pload
 
+> [!WARNING]
+> - This is project is under development yet. You can try it carefully if you are interested in it.
+> - Pyenv is required for this project for Python management.  
+
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![PyPI Version](https://img.shields.io/pypi/v/pload?color=blue)](https://pypi.org/project/pload/)
+
+
 A Minimalist Python Virtual Environment Management Tool, support: 
 
 - powershell
@@ -7,13 +15,6 @@ A Minimalist Python Virtual Environment Management Tool, support:
 - zsh
 - fishshell
 - cmd(TODO)
-
-> [!WARNING]
-> This is project is under development yet. You can try it carefully if you are interested in it.
-
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![PyPI Version](https://img.shields.io/pypi/v/pload?color=blue)](https://pypi.org/project/pload/)
-
 ## # Overview
 
 pload is a command-line utility designed for efficient management of Python virtual environments. It supports both global environment management and local project-specific environments, with regex pattern matching and pyenv integration capabilities.

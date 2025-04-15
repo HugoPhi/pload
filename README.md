@@ -14,11 +14,11 @@ A Minimalist Python Virtual Environment Management Tool, support:
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![PyPI Version](https://img.shields.io/pypi/v/pload?color=blue)](https://pypi.org/project/pload/)
 
-## Overview
+## # Overview
 
 pload is a command-line utility designed for efficient management of Python virtual environments. It supports both global environment management and local project-specific environments, with regex pattern matching and pyenv integration capabilities.
 
-## Installation
+## # Installation
 
 ### Installation from sdist(wheel not support.)
 ```bash
@@ -26,13 +26,11 @@ pip install --no-binary :all: pload
 ```
 
 ### Shell Autocompletion (Optional)
-> [!NOTE]
+> [!WARNING]
 > TODO: Manually add complete file for pload.
 
 
-## Command Reference
-
-### Core Operations
+## # Usage
 
 #### 1. Create Global Environment
 ```bash
@@ -44,7 +42,7 @@ pload new -v 3.8.10 -m data_analysis -r numpy pandas
 # Creates: 3.8.10-data_analysis
 ```
 
-> [!NOTE]
+> [!WARNING]
 > TODO: Support pload.toml to manage all packages, env & ...
 
 #### 2. Initialize Local Environment
@@ -82,28 +80,29 @@ pload .                 # Activate local .venv
 > [!NOTE]
 > This part is completed by scripts under '$home/venvs/scripts'.
 
-### Advanced Operations
-
-#### Environment Copy (Work in Progress)
+#### 5. Environment Copy (TODO)
 ```bash
 pload cp --from <source_env> --to <target_env>
 ```
 
-## Feature Details
+> [!WARNING]
+> TODO ... But actually a perfect solution for this function is not raised yet. 
 
-### Global Environment Management
+## # Feature Details
+
+### @ Global Environment Management
 - Stores environments in `~/.pload/venvs`
 - Automatic version-message naming convention
 - Supports batch operations using regular expressions
 
-### Local Environment Integration
+### @ Local Environment Integration
 - Creates `.venv` directories in project folders
 - Compatible with existing virtual environments
 
-### Python Version Management
+### @ Python Version Management
 - Requires pyenv for version control
 - Lists available Python versions via `pload list --version`
 
-## License
+## # License
 
 > Apache License 2.0, Copyright 2025 Yunming Hu.

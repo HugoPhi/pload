@@ -1,11 +1,18 @@
 # pload
 
-A Minimalist Python Virtual Environment Management Tool, support powershell, bash, zsh, fishshell.
+A Minimalist Python Virtual Environment Management Tool, support: 
+
+- powershell
+- bash
+- zsh
+- fishshell
+- cmd(TODO)
 
 > [!WARNING]
 > This is project is under development yet. You can try it carefully if you are interested in it.
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![PyPI Version](https://img.shields.io/pypi/v/pload?color=blue)](https://pypi.org/project/pload/)
 
 ## Overview
 
@@ -13,16 +20,15 @@ pload is a command-line utility designed for efficient management of Python virt
 
 ## Installation
 
-### Basic Installation
+### Installation from sdist(wheel not support.)
 ```bash
-pip install pload
+pip install --no-binary :all: pload
 ```
 
 ### Shell Autocompletion (Optional)
-Add to your shell configuration (`~/.bashrc` or `~/.zshrc`):
-```bash
-eval "$(register-python-argcomplete pload)"
-```
+> [!NOTE]
+> TODO: Manually add complete file for pload.
+
 
 ## Command Reference
 
@@ -37,6 +43,9 @@ pload new --version <python_version> [--message <description>] [--channel <pip_c
 pload new -v 3.8.10 -m data_analysis -r numpy pandas
 # Creates: 3.8.10-data_analysis
 ```
+
+> [!NOTE]
+> TODO: Support pload.toml to manage all packages, env & ...
 
 #### 2. Initialize Local Environment
 ```bash
@@ -56,12 +65,22 @@ pload rm --expression <regex>   # Pattern matching
 # List environments
 pload list [--expression <regex>] [--version]
 ```
+> [!WARNING]
+> Because of the inner parameter parser for powershell, you should use '--v' for short of '--version'. For example: 
+> 
+> ```bash
+> pload list --v
+> ```
+> And short for `--envs` is also replaced by `-n` due to this.  
 
 #### 4. Environment Activation
 ```bash
 pload <global_env_name>  # Activate global environment
 pload .                 # Activate local .venv
 ```
+
+> [!NOTE]
+> This part is completed by scripts under '$home/venvs/scripts'.
 
 ### Advanced Operations
 
@@ -84,35 +103,6 @@ pload cp --from <source_env> --to <target_env>
 ### Python Version Management
 - Requires pyenv for version control
 - Lists available Python versions via `pload list --version`
-
-## Common Issues
-
-### Q: Environment activation failure
-**Solution:** Verify environment exists in target location:
-```bash
-pload list --expression "<env_name>"
-```
-
-### Q: Missing Python versions
-**Solution:** Install required versions through pyenv first:
-```bash
-pyenv install 3.8.10
-```
-
-### Q: Local environment detection
-**Solution:** Ensure `.venv` directory exists in current path before activation
-
-## Development Contribution
-
-1. Clone repository
-2. Create feature branch
-3. Implement changes with test cases
-4. Submit pull request
-
-```bash
-# Development setup
-python setup.py develop
-```
 
 ## License
 

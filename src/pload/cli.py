@@ -2,16 +2,22 @@ import os
 import re
 import argparse
 import argcomplete
-from pload.utils import Colors
-from pload.cmds import (
-    create_venv, remove_venv, set_venv,
-    get_venvs, get_python_versions, rdvenv
-)
+from pload.managers.color import Colors
+from pload.managers.platform import ConfigManager
+from pload.managers.pyversion import PythonManager
+from pload.managers.venv import VenvManager
+from pload.managers.dependency import DependencyManager
+
 
 support_cmds = ['new', 'init', 'rm', 'cp', 'list']
 
 
 def main():
+    platform_mgr = ConfigManager()
+    python_mgr = PythonManager(platform_mgr)
+    venv_mgr = VenvManager(platform_mgr)
+    dep_mgr = DependencyManager(platform_mgr)
+
     parser = argparse.ArgumentParser(
         description='A Minimal Python Venv Manage Tool. You can run '
                     f'{Colors.yellow("`pload [venv name]`")} to set '
@@ -120,13 +126,13 @@ def main():
     if all[0] not in support_cmds:
         if len(all) == 1:
             env_name = all[0]
-            set_venv(env_name)
+            venv_mgr.set_current_venv(env_name)
             exit(0)
         else:
             print(f'[!] you can only activate {Colors.red("one venv once")}. But get: {all}')
             exit(1)
 
-    argcomplete.autocomplete(parser)  # 添加补全
+    argcomplete.autocomplete(parser)
     args = parser.parse_known_args()[0]
 
     if all[0] == 'new':
@@ -141,14 +147,17 @@ def main():
             new_subparser.print_help()
             exit(1)
 
-        create_venv(
+        venv_path = venv_mgr.create_venv(
             version=version,
-            requirements=requirements,
-            channel=channel,
             message=message,
             is_local=False
         )
-        return
+        if requirements:
+            dep_mgr.install_dependencies(
+                venv_path=venv_path,
+                requirements=requirements,
+                channel=channel
+            )
 
     elif all[0] == 'init':
         version = args.version
@@ -161,18 +170,21 @@ def main():
             init_subparser.print_help()
             exit(1)
 
-        create_venv(
+        venv_path = venv_mgr.create_venv(
             version=version,
-            requirements=requirements,
-            channel=channel,
             is_local=True
         )
-        return
+        if requirements:
+            dep_mgr.install_dependencies(
+                venv_path=venv_path,
+                requirements=requirements,
+                channel=channel
+            )
 
     elif all[0] == 'rm':
         envs = args.envs if args.envs else []
         expr = args.expression if args.expression else '^$'
-        venvs = get_venvs()
+        venvs = venv_mgr.get_existing_venvs()
 
         envs += [x for x in venvs if re.fullmatch(expr, x)]
 
@@ -188,12 +200,18 @@ def main():
                     print('[!] There are not local venv.')
                     exit(1)
 
-                remove_venv('.')
-                print(f'[*] .venv -> {Colors.green(os.path.join(os.getcwd(), ".venv"))} is removed.')
+                user_input = input(f'Are you sure to remove {Colors.green("local -> " + os.path.join(os.getcwd(), ".venv"))}(Y/N): ')
+                if user_input in ['Y', 'y']:
+                    venv_mgr.remove_venv('.')
+                    print(f'[*] .venv -> {Colors.green(os.path.join(os.getcwd(), ".venv"))} is removed.')
+                    exit(0)
+                else:
+                    print('[!] Remove aborted.')
+                    exit(1)
             elif env in venvs:
                 user_input = input(f'please input {Colors.green(env)} to remove it: ')
                 if user_input == env:
-                    remove_venv(env)
+                    venv_mgr.remove_venv(env)
                 else:
                     print(f'[!] input and {Colors.green(env)} is not match')
                     exit(1)
@@ -202,11 +220,9 @@ def main():
                 exit(1)
 
             print(f'[*] {Colors.green(env)} is successfully uninstalled.')
-        return
 
     elif all[0] == 'cp':
         print('TODO')
-        return
 
     elif all[0] == 'list':
         if args.version is True:
@@ -214,13 +230,13 @@ def main():
             print()
 
             expr = args.expression
-            for v in get_python_versions():
+            for v in python_mgr.get_installed_versions():
                 if re.fullmatch(expr, v):
                     print(f'    {v}')
             return
 
         expr = args.expression
-        CUR = rdvenv('CUR')
+        CUR = platform_mgr.rdvenv('CUR')
 
         print(f'[*] {Colors.green("Virtual envs")} managed by pload:')
         print()
@@ -233,12 +249,11 @@ def main():
                 if CUR[9:] != os.path.join(os.getcwd(), '.venv'):
                     print(f'    local -> {os.path.join(os.getcwd(), ".venv")}')
 
-        for venv in get_venvs():
+        for venv in venv_mgr.get_existing_venvs():
             if venv == CUR:
                 print(f' >  {Colors.yellow(CUR)}')
             elif re.fullmatch(expr, venv):
                 print(f'    {venv}')
-        return
 
 
 if __name__ == '__main__':

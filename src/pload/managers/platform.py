@@ -39,6 +39,10 @@ class ConfigManager:
             'linux': {
                 'regex': r"^[a-zA-Z0-9_-]+$",
                 'error_msg': "不符合 Linux 命名规则（允许字母/数字/下划线/连字符）"
+            },
+            'darwin': {
+                'regex': r"^[a-zA-Z0-9_-]+$",
+                'error_msg': "不符合 MacOS 命名规则（允许字母/数字/下划线/连字符）"
             }
         }
 

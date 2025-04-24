@@ -1,6 +1,7 @@
 import os
 import re
 import sys
+import subprocess
 
 
 class ConfigManager:
@@ -22,6 +23,13 @@ class ConfigManager:
             # Windows 配置
             self.pyenv_path = os.environ.get('PYENV_HOME')
             self.pyenv_exe = os.path.join(self.pyenv_path, 'bin', 'pyenv.bat')
+            self.pyenv_versions = os.path.join(self.pyenv_path, 'versions')
+        elif self.platform == 'darwin':
+            # macOS 配置: /opt/homebrew/bin/pyenv
+            home = os.path.expanduser("~")
+            self.pyenv_path = os.path.join(home, '.pyenv')
+            # self.pyenv_exe = os.path.join(self.pyenv_path, 'bin', 'pyenv')
+            self.pyenv_exe = '/opt/homebrew/bin/pyenv'
             self.pyenv_versions = os.path.join(self.pyenv_path, 'versions')
         else:
             # Linux/Mac 配置
@@ -59,10 +67,27 @@ class ConfigManager:
 
     def get_python_path(self, version):
         """获取 Python 解释器路径"""
+
         if self.platform == 'win32':
-            return os.path.join(self.pyenv_versions, version, 'python.exe')
+            python_exe = os.path.join(self.pyenv_versions, version, 'python.exe')
         else:
-            return os.path.join(self.pyenv_versions, version, 'bin', 'python')
+            python_exe = os.path.join(self.pyenv_versions, version, 'bin', 'python')
+
+        if os.path.exists(python_exe):
+            return python_exe
+        else:
+            user_input = input(f'[?] Python {version} not found. Do you want to install it? (y/n): ')
+            if user_input.lower() == 'y':
+                subprocess.run([self.pyenv_exe, 'install', version])
+
+                # show output of the installation
+                for line in iter(subprocess.check_output([self.pyenv_exe, 'versions']).decode('utf-8').splitlines()):
+                    print(line)
+
+                return self.get_python_path(version)
+            else:
+                print('[!] Operation canceled.')
+                exit(1)
 
     def get_pip_path(self, venv_path):
         """获取虚拟环境中的 pip 路径"""

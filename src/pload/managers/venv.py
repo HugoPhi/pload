@@ -1,104 +1,96 @@
 import os
 import shutil
 import subprocess
-import sys
+from pathlib import Path
 
+from pload.errors import PloadError
 from pload.managers.color import Colors
-from pload.managers.platform import ConfigManager
 
 
 class VenvManager:
-    def __init__(self, config: ConfigManager):
+    def __init__(self, config):
         self.config = config
 
-    def create_venv(self, version, message='normal', is_local=False):
+    def create_venv(
+        self,
+        version=None,
+        message="normal",
+        is_local=False,
+        project_dir=None,
+        target=None,
+        name=None,
+    ):
         try:
             target_path, display_name = self.config.resolve_venv_path(
-                version, message, is_local
+                version=version,
+                message=message,
+                is_local=is_local,
+                project_dir=project_dir,
+                target=target,
+                name=name,
             )
-        except ValueError as e:
-            print(f"[!] {str(e)}")
-            sys.exit(1)
+        except ValueError as exc:
+            raise PloadError(str(exc)) from exc
 
-        if os.path.exists(target_path):
-            print(f"[!] Venv {Colors.yellow(display_name)} already exsit.")
-            sys.exit(1)
+        if target_path.exists():
+            raise PloadError(f"environment already exists: {target_path}")
 
         python_exe = self.config.get_python_path(version)
-
-        print(f'[*] Creating env: {Colors.green(display_name)} -> {Colors.green(target_path)}')
-        create_cmd = [python_exe, '-m', 'venv', target_path]
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        print(f"[*] Creating {Colors.green(display_name)} at {Colors.green(target_path)}")
         process = subprocess.run(
-            create_cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
+            [str(python_exe), "-m", "venv", str(target_path)],
+            capture_output=True,
+            text=True,
+            check=False,
         )
-
         if process.returncode != 0:
-            print(f'[!] Failed to create venv: {Colors.red(display_name)} -> {Colors.red(target_path)}\n[!] Error Message: {process.stderr}')
-            sys.exit(1)
+            shutil.rmtree(target_path, ignore_errors=True)
+            detail = process.stderr.strip() or process.stdout.strip()
+            raise PloadError(f"failed to create {display_name}: {detail}")
 
-        print(f'[*] Successfully created {Colors.green(display_name)}. 🌟')
+        print(f"[*] Created {Colors.green(display_name)}")
         return target_path
 
     def get_existing_venvs(self):
-        if not os.path.exists(self.config.venv_path):
+        root = self.config.venv_path
+        if not root.is_dir():
             return []
+        return sorted(
+            child.name for child in root.iterdir()
+            if not child.is_symlink()
+            and child.is_dir()
+            and (child / "pyvenv.cfg").is_file()
+        )
 
-        venvs = []
-        for name in os.listdir(self.config.venv_path):
-            full_path = os.path.join(self.config.venv_path, name)
-            if os.path.isdir(full_path):
-                if name == 'scripts':
-                    continue
-                venvs.append(name)
-        return venvs
-
-    def remove_venv(self, venv_name):
-        current_env = self.config.rdvenv('CUR')
-        if venv_name == current_env or venv_name == current_env[0]:
-            print(f'[!] Can not remove {Colors.red(current_env)}, beacause it is under using.')
-            sys.exit(1)
-
-        is_local = venv_name == '.'
-
-        if is_local:
-            target_path = os.path.join(os.getcwd(), '.venv')
-            if not os.path.exists(target_path):
-                print('[!] Local venv do not exsits.')
-                sys.exit(1)
+    def resolve_existing(self, venv_name, project_dir=None):
+        if venv_name == ".":
+            path = Path(project_dir or Path.cwd()).expanduser().resolve() / ".venv"
         else:
-            target_path = os.path.join(self.config.venv_path, venv_name)
-            if venv_name not in self.get_existing_venvs():
-                print(f'[!] Global venv "{venv_name}" do not exsits.')
-                sys.exit(1)
+            candidate = Path(venv_name).expanduser()
+            has_separator = "/" in venv_name or "\\" in venv_name
+            if candidate.is_absolute() or has_separator:
+                path = candidate
+            else:
+                path = self.config.venv_path / venv_name
+        if path.is_symlink():
+            raise PloadError(f"refusing to manage a symlink as an environment: {path}")
+        path = path.resolve()
+        if not (path / "pyvenv.cfg").is_file():
+            raise PloadError(f"not a virtual environment: {path}")
+        return path.resolve()
 
-        try:
-            shutil.rmtree(target_path)
-            print(f'[*] Removed {Colors.green(os.path.basename(target_path))}.')
-        except Exception as e:
-            print(f'[!] Failed to remove venv. {str(e)}')
-            sys.exit(1)
+    def remove_venv(self, venv_name, project_dir=None):
+        target_path = self.resolve_existing(venv_name, project_dir=project_dir)
+        active = Path(os.environ["VIRTUAL_ENV"]).resolve() if os.environ.get("VIRTUAL_ENV") else None
+        if active == target_path:
+            raise PloadError(f"cannot remove the active environment: {target_path}")
+        shutil.rmtree(target_path)
+        print(f"[*] Removed {Colors.green(target_path)}")
 
-    def set_current_venv(self, venv_name):
-        is_local = venv_name == '.'
-
-        if is_local:
-            target_path = os.path.join(os.getcwd(), '.venv')
-            if not os.path.exists(target_path):
-                print(f'[!] Local venv {Colors.green(".venv")} is not created.')
-                sys.exit(1)
-            display_name = f'.venv -> {target_path}'
-        else:
-            if venv_name not in self.get_existing_venvs():
-                print(f'[!] Global venv "{venv_name}" is not created.')
-                sys.exit(1)
-            display_name = venv_name
-            target_path = os.path.join(self.config.venv_path, venv_name)
-
-        if not os.path.exists(os.path.join(target_path, 'pyvenv.cfg')):
-            print(f'[!] Invalid venv: {Colors.red(target_path)}, beacause not exsit: {os.path.join(target_path, "pyvenv.cfg")}')
-            sys.exit(1)
-
-        self.config.wrvenv('CUR', display_name)
+    def activation_script(self, venv_name, shell=None, project_dir=None):
+        path = self.resolve_existing(venv_name, project_dir=project_dir)
+        script = self.config.activate_path(path, shell=shell)
+        if not script.is_file():
+            raise PloadError(f"activation script not found: {script}")
+        return script

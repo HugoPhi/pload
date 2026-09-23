@@ -56,11 +56,13 @@ def test_find_python_chooses_newest_matching_patch(monkeypatch, tmp_path):
 
 
 def test_runtime_table_includes_type_and_path():
+    uv_path = Path("/opt/uv/python")
+    conda_path = Path("/opt/conda/python")
     lines = PythonManager.format_runtimes([
-        PythonRuntime("3.12.8", "uv", Path("/opt/uv/python")),
-        PythonRuntime("3.11.9", "conda", Path("/opt/conda/python")),
+        PythonRuntime("3.12.8", "uv", uv_path),
+        PythonRuntime("3.11.9", "conda", conda_path),
     ])
 
     assert lines[0].split() == ["VERSION", "TYPE", "PATH"]
-    assert any("3.12.8" in line and "uv" in line and "/opt/uv/python" in line for line in lines)
+    assert any("3.12.8" in line and "uv" in line and str(uv_path) in line for line in lines)
     assert any("3.11.9" in line and "conda" in line for line in lines)

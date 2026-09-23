@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.0 - Unreleased
+## 0.4.0 - 2026-09-23
 
 ### Added
 
@@ -24,4 +24,3 @@
 - Crashes when pyenv, state files, or environment directories do not exist.
 - Hard-coded Homebrew and home-directory paths.
 - Inconsistent project metadata and license declaration.
-

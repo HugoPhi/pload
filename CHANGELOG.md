@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.1 - 2026-09-24
+
+### Fixed
+
+- Report the version actually installed in the private runtime after an
+  in-place upgrade, instead of the older installer process version.
+
 ## 0.6.0 - 2026-09-23
 
 ### Added

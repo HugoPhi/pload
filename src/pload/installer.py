@@ -7,6 +7,7 @@ from pathlib import Path
 
 from pload import __version__
 from pload.errors import PloadError
+from pload.managers.color import Colors
 from pload.settings import (
     USTC_PYTHON_MIRROR,
     default_bin_dir,
@@ -16,6 +17,22 @@ from pload.settings import (
 
 PYPI_OFFICIAL_INDEX = "https://pypi.org/simple"
 PYPI_TSINGHUA_INDEX = "https://pypi.tuna.tsinghua.edu.cn/simple"
+PYPI_USTC_INDEX = "https://mirrors.ustc.edu.cn/pypi/simple"
+PYPI_ALIYUN_INDEX = "https://mirrors.aliyun.com/pypi/simple"
+
+PYTHON_SOURCE_CHOICES = [
+    ("official", "Astral's official python-build-standalone releases; newest and canonical"),
+    ("ustc", "USTC mirror in China; often faster on mainland networks"),
+    ("custom", "Your own HTTPS or file:// mirror; advanced users only"),
+]
+
+PIP_SOURCE_CHOICES = [
+    ("official", "Official PyPI; canonical and usually the first to receive new releases"),
+    ("tsinghua", "Tsinghua University PyPI mirror in China"),
+    ("ustc", "University of Science and Technology of China PyPI mirror"),
+    ("aliyun", "Alibaba Cloud PyPI mirror in China"),
+    ("custom", "A private or other compatible package index URL"),
+]
 
 
 def build_parser():
@@ -36,8 +53,12 @@ def build_parser():
   pload-install --yes --source ustc
       Use the documented USTC mirror for managed Python downloads.
 
+  pload-install --yes --pip-source aliyun
+      Install pload and uv through the Alibaba Cloud PyPI mirror.
+
 The installer never modifies a shell profile unless --shell is supplied or the
-interactive user explicitly chooses it.""",
+interactive user explicitly chooses it. Interactive source selection uses a
+numbered menu with an explanation for every option.""",
     )
     parser.add_argument("--home", help="pload data and private-runtime directory")
     parser.add_argument("--bin-dir", help="directory for the stable pload executable")
@@ -53,7 +74,7 @@ interactive user explicitly chooses it.""",
         help="advanced uv download metadata URL or local JSON path",
     )
     parser.add_argument(
-        "--pip-source", choices=["official", "tsinghua", "custom"],
+        "--pip-source", choices=["official", "tsinghua", "ustc", "aliyun", "custom"],
         help="package index preset used for the private runtime",
     )
     parser.add_argument("--pip-index", help="package index used to install pload and uv")
@@ -75,19 +96,46 @@ interactive user explicitly chooses it.""",
 def ask(prompt, default, non_interactive=False):
     if non_interactive:
         return str(default)
-    answer = input(f"{prompt} [{default}]: ").strip()
+    answer = input(f"{Colors.cyan(prompt)} [{Colors.green(default)}]: ").strip()
     return answer or str(default)
 
 
 def ask_choice(prompt, choices, default, non_interactive=False):
     if non_interactive:
         return default
-    rendered = "/".join(f"[{item}]" if item == default else item for item in choices)
+    items = [item if isinstance(item, tuple) else (item, "") for item in choices]
+    keys = [item[0] for item in items]
+    default_index = keys.index(default) if default in keys else 0
     while True:
-        answer = input(f"{prompt} ({rendered}): ").strip().lower() or default
-        if answer in choices:
+        print(f"\n{Colors.bold(prompt)}")
+        for index, (key, description) in enumerate(items, 1):
+            marker = Colors.green(" (default)") if index - 1 == default_index else ""
+            print(f"  {Colors.cyan(index)}) {Colors.bold(key)}{marker}")
+            if description:
+                print(f"     {description}")
+        answer = input(
+            f"{Colors.cyan('Enter a number')} [{Colors.green(default_index + 1)}]: "
+        ).strip().lower()
+        if not answer:
+            return keys[default_index]
+        if answer.isdigit() and 1 <= int(answer) <= len(items):
+            return keys[int(answer) - 1]
+        if answer in keys:
             return answer
-        print(f"Please choose one of: {', '.join(choices)}")
+        print(Colors.yellow(f"Please enter 1-{len(items)}."))
+
+
+def print_welcome():
+    print(Colors.bold("\npload guided setup"))
+    print(
+        "This installer keeps pload itself, downloaded Python runtimes, and virtual "
+        "environments independent. Press Enter to accept any recommended default."
+    )
+    print(Colors.cyan("\nDirectory layout"))
+    print("  pload home       configuration, private runtime, state, and caches")
+    print("  executable bin   stable `pload` command; add this directory to PATH")
+    print("  environments     every managed project environment")
+    print("  Python runtimes  Python versions downloaded through uv")
 
 
 def collect_settings(args):
@@ -117,7 +165,10 @@ def collect_settings(args):
     ).expanduser().resolve()
     default_source = existing_python.get("source", "official")
     source = args.source or ask_choice(
-        "Python download source", ["official", "ustc", "custom"], default_source, args.yes
+        "Choose the Python runtime download source",
+        PYTHON_SOURCE_CHOICES,
+        default_source,
+        args.yes,
     )
     mirror = None
     if source == "ustc":
@@ -136,13 +187,19 @@ def collect_settings(args):
         else:
             detected = detect_shell()
             shell = ask_choice(
-                "configure a shell profile", [detected, "none"], detected, False
+                "Choose a shell profile to configure",
+                [
+                    (detected, f"Update the detected {detected} profile automatically"),
+                    ("none", "Do not change a shell profile; print manual instructions"),
+                ],
+                detected,
+                False,
             )
 
     default_pip_source = existing.get("pip_source", "official")
     pip_source = args.pip_source or ask_choice(
-        "Python package index",
-        ["official", "tsinghua", "custom"],
+        "Choose the Python package index used to install pload and uv",
+        PIP_SOURCE_CHOICES,
         default_pip_source,
         args.yes,
     )
@@ -153,6 +210,10 @@ def collect_settings(args):
         pip_index = PYPI_OFFICIAL_INDEX
     elif pip_source == "tsinghua":
         pip_index = PYPI_TSINGHUA_INDEX
+    elif pip_source == "ustc":
+        pip_index = PYPI_USTC_INDEX
+    elif pip_source == "aliyun":
+        pip_index = PYPI_ALIYUN_INDEX
     elif pip_source == "custom":
         pip_index = existing.get("pip_index")
     if pip_source == "custom" and not pip_index:
@@ -310,6 +371,8 @@ def configure_shell(settings):
 
 def run(argv=None):
     args = build_parser().parse_args(argv)
+    if not args.yes:
+        print_welcome()
     settings = collect_settings(args)
     path = save_settings(settings["home"], settings)
     if args.no_runtime_install:

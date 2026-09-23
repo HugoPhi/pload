@@ -1,6 +1,8 @@
+import json
 import os
 import shutil
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
 from pload.errors import PloadError
@@ -19,6 +21,7 @@ class VenvManager:
         project_dir=None,
         target=None,
         name=None,
+        description=None,
     ):
         try:
             target_path, display_name = self.config.resolve_venv_path(
@@ -50,7 +53,120 @@ class VenvManager:
             raise PloadError(f"failed to create {display_name}: {detail}")
 
         print(f"[*] Created {Colors.green(display_name)}")
+        entry = self.register_environment(
+            target_path,
+            name=display_name,
+            description=description or "",
+        )
+        print(f"[*] Assigned {Colors.cyan(entry['id'])}")
         return target_path
+
+    @property
+    def registry_path(self):
+        return self.config.state_path / "environments.json"
+
+    def _read_registry(self):
+        path = self.registry_path
+        if not path.is_file():
+            return {"version": 1, "next_id": 1, "environments": []}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise PloadError(f"cannot read environment registry {path}: {exc}") from exc
+        if not isinstance(data, dict) or not isinstance(data.get("environments"), list):
+            raise PloadError(f"invalid environment registry: {path}")
+        data.setdefault("version", 1)
+        data.setdefault("next_id", 1)
+        return data
+
+    def _write_registry(self, data):
+        self.config.state_path.mkdir(parents=True, exist_ok=True)
+        path = self.registry_path
+        temporary = path.with_suffix(".json.tmp")
+        temporary.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(path)
+
+    @staticmethod
+    def _valid_environment(path):
+        path = Path(path)
+        return not path.is_symlink() and path.is_dir() and (path / "pyvenv.cfg").is_file()
+
+    @staticmethod
+    def _id_number(environment_id):
+        value = str(environment_id)
+        return int(value[1:]) if value.startswith("v") and value[1:].isdigit() else 0
+
+    def register_environment(self, path, name=None, description=None):
+        resolved = Path(path).expanduser().resolve()
+        data = self._read_registry()
+        for entry in data["environments"]:
+            if Path(entry.get("path", "")).expanduser().resolve() == resolved:
+                changed = False
+                if name and entry.get("name") != name:
+                    entry["name"] = name
+                    changed = True
+                if description is not None and entry.get("description") != description:
+                    entry["description"] = description
+                    changed = True
+                if changed:
+                    self._write_registry(data)
+                return entry
+
+        used = {self._id_number(item.get("id")) for item in data["environments"]}
+        next_id = max(int(data.get("next_id", 1)), max(used or {0}) + 1)
+        entry = {
+            "id": f"v{next_id}",
+            "name": name or resolved.name,
+            "path": str(resolved),
+            "description": description or "",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        data["environments"].append(entry)
+        data["next_id"] = next_id + 1
+        self._write_registry(data)
+        return entry
+
+    def environments(self):
+        """Return registered environments and import legacy managed environments."""
+        data = self._read_registry()
+        registered_paths = {
+            str(Path(entry.get("path", "")).expanduser().resolve())
+            for entry in data["environments"]
+            if entry.get("path")
+        }
+        root = self.config.venv_path
+        if root.is_dir():
+            for child in sorted(root.iterdir(), key=lambda item: item.name.lower()):
+                resolved = str(child.resolve())
+                if self._valid_environment(child) and resolved not in registered_paths:
+                    self.register_environment(child, name=child.name)
+                    registered_paths.add(resolved)
+
+        data = self._read_registry()
+        result = []
+        for entry in data["environments"]:
+            path = Path(entry.get("path", "")).expanduser()
+            if self._valid_environment(path):
+                item = dict(entry)
+                item["python"] = self.environment_python_version(path)
+                result.append(item)
+        return sorted(result, key=lambda item: self._id_number(item.get("id")))
+
+    @staticmethod
+    def environment_python_version(path):
+        config = Path(path) / "pyvenv.cfg"
+        try:
+            values = {}
+            for line in config.read_text(encoding="utf-8").splitlines():
+                if "=" in line:
+                    key, value = line.split("=", 1)
+                    values[key.strip().lower()] = value.strip()
+            return values.get("version") or values.get("version_info") or "unknown"
+        except OSError:
+            return "unknown"
 
     def get_existing_venvs(self):
         root = self.config.venv_path
@@ -67,9 +183,19 @@ class VenvManager:
         if venv_name == ".":
             path = Path(project_dir or Path.cwd()).expanduser().resolve() / ".venv"
         else:
+            by_id = next(
+                (entry for entry in self.environments() if entry.get("id") == venv_name),
+                None,
+            )
+            if by_id:
+                path = Path(by_id["path"])
+            else:
+                path = None
             candidate = Path(venv_name).expanduser()
             has_separator = "/" in venv_name or "\\" in venv_name
-            if candidate.is_absolute() or has_separator:
+            if path is not None:
+                pass
+            elif candidate.is_absolute() or has_separator:
                 path = candidate
             else:
                 path = self.config.venv_path / venv_name
@@ -86,6 +212,12 @@ class VenvManager:
         if active == target_path:
             raise PloadError(f"cannot remove the active environment: {target_path}")
         shutil.rmtree(target_path)
+        data = self._read_registry()
+        data["environments"] = [
+            entry for entry in data["environments"]
+            if Path(entry.get("path", "")).expanduser().resolve() != target_path
+        ]
+        self._write_registry(data)
         print(f"[*] Removed {Colors.green(target_path)}")
 
     def activation_script(self, venv_name, shell=None, project_dir=None):

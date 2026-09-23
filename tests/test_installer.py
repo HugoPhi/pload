@@ -6,8 +6,12 @@ from subprocess import CompletedProcess
 
 from pload import installer
 from pload.installer import (
+    PIP_SOURCE_CHOICES,
+    PYPI_ALIYUN_INDEX,
     PYPI_OFFICIAL_INDEX,
     PYPI_TSINGHUA_INDEX,
+    PYPI_USTC_INDEX,
+    ask_choice,
     collect_settings,
     configure_shell,
     install_private_runtime,
@@ -54,6 +58,26 @@ def test_official_pip_source_is_explicit(tmp_path):
     settings = collect_settings(installer_args(tmp_path, pip_source="official"))
 
     assert settings["pip_index"] == PYPI_OFFICIAL_INDEX
+
+
+def test_additional_pip_source_presets(tmp_path):
+    ustc = collect_settings(installer_args(tmp_path, pip_source="ustc"))
+    aliyun = collect_settings(installer_args(tmp_path, pip_source="aliyun"))
+
+    assert ustc["pip_index"] == PYPI_USTC_INDEX
+    assert aliyun["pip_index"] == PYPI_ALIYUN_INDEX
+
+
+def test_guided_choice_accepts_numeric_selection(monkeypatch, capsys):
+    monkeypatch.setattr("builtins.input", lambda prompt: "3")
+
+    selected = ask_choice("Package source", PIP_SOURCE_CHOICES, "official")
+
+    assert selected == "ustc"
+    output = capsys.readouterr().out
+    assert "Official PyPI" in output
+    assert "Tsinghua University" in output
+    assert "Alibaba Cloud" in output
 
 
 def test_config_only_install_writes_reusable_configuration(tmp_path):

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.7.0 - 2026-09-24
+
+### Added
+
+- Persistent monotonic IDs (`v1`, `v2`, ...) and descriptions for environments.
+- Activation, path lookup, and removal by environment ID.
+- Rich, colored tables for environment and Python-runtime listings.
+- USTC and Alibaba Cloud PyPI presets alongside official PyPI and Tsinghua.
+- Detailed, colored, numbered choices in the guided installer.
+
+### Changed
+
+- `pload list` now shows ID, name, Python version, description, and path.
+- Existing managed environments are registered automatically on first use.
+
 ## 0.6.2 - 2026-09-24
 
 ### Fixed

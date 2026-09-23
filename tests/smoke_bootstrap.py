@@ -31,8 +31,13 @@ def main():
         [str(launcher), "--version"],
         [str(launcher), "python", "install", "3.12"],
         [str(launcher), "python", "path", "3.12"],
-        [str(launcher), "new", "--name", "smoke", "--version", "3.12"],
-        [str(launcher), "rm", "smoke", "--yes"],
+        [
+            str(launcher), "new", "--name", "smoke", "--version", "3.12",
+            "--description", "Cross-platform smoke environment",
+        ],
+        [str(launcher), "list"],
+        [str(launcher), "path", "v1"],
+        [str(launcher), "rm", "v1", "--yes"],
     ]
     for command in commands:
         subprocess.run(command, check=True)

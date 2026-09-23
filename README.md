@@ -30,7 +30,9 @@ py -m pip install --user --upgrade pload
 py -m pload.installer
 ```
 
-The installer asks for:
+The guided installer explains every directory, then presents colored, numbered
+menus for source and shell choices. Press Enter to accept the marked default.
+It asks for:
 
 - the pload data directory;
 - the stable executable `bin` directory;
@@ -39,6 +41,17 @@ The installer asks for:
 - the Python runtime download source;
 - the Python package index;
 - whether to update a shell profile.
+
+Built-in package-index presets are:
+
+1. `official` — `https://pypi.org/simple`
+2. `tsinghua` — `https://pypi.tuna.tsinghua.edu.cn/simple`
+3. `ustc` — `https://mirrors.ustc.edu.cn/pypi/simple`
+4. `aliyun` — `https://mirrors.aliyun.com/pypi/simple`
+5. `custom` — any compatible private or public index
+
+The Python-runtime source is selected separately because an ordinary PyPI
+mirror cannot host uv's `python-build-standalone` runtime archives.
 
 It then creates a private runtime under `PLOAD_HOME/runtime` and writes a stable
 `pload` executable into the selected `bin` directory. The executable does not
@@ -161,16 +174,27 @@ does not disable uv's normal archive metadata and integrity handling.
 ## Create and activate environments
 
 ```console
-pload new --name data                 # private-runtime Python
-pload new --name web --version 3.12   # any discovered Python 3.12
-pload data                            # activate
+pload new --name data --description "Data analysis"
+pload new --name web --version 3.12 -d "Web development"
+pload list
+pload v1                              # activate by stable ID
+pload data                            # names continue to work
 
-pload init                            # create .venv here
+pload init -d "Current project"       # create and register .venv here
 pload .                               # activate it
 pload init -r pytest requests         # install packages too
 ```
 
-`--version` also accepts an exact interpreter path.
+Every environment created by pload receives a monotonic ID such as `v1`, `v2`,
+or `v3`. IDs are not reused after removal. Existing environments under the
+managed root are assigned IDs automatically the first time they are listed.
+The ID registry is stored under the configurable state directory, so it remains
+inside the user's isolated pload layout.
+
+`pload list` uses a Rich table and shows ID, name, Python version, description,
+and full path. Color is enabled on terminals and can be disabled with the
+standard `NO_COLOR` environment variable. `--version` also accepts an exact
+interpreter path.
 
 ## Directory isolation
 
@@ -222,7 +246,9 @@ Other useful commands:
 
 ```console
 pload list
+pload path v1
 pload path data
+pload rm v1 --yes
 pload rm data
 pload rm data --yes
 pload rm --expression '^test-'

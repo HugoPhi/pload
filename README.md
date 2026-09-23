@@ -1,45 +1,143 @@
 # pload
 
-`pload` is a small Python virtual-environment manager for Bash, Zsh, Fish, and
-PowerShell. It uses the standard library's `venv` module, works without pyenv,
-and lets every file it owns live under a directory you choose.
+`pload` is a relocatable Python runtime and virtual-environment manager for
+Bash, Zsh, Fish, and PowerShell. The tool, downloaded Python runtimes, managed
+environments, state, and caches can all be placed in user-selected directories.
 
-> Version 0.4 is a compatibility-focused beta. The familiar `new`, `init`,
-> `rm`, and `list` commands remain available, while installation no longer
-> edits shell profile files automatically.
+pyenv is supported for compatibility, but is not required.
 
-## Install
+## Recommended installation
+
+Install the small bootstrap package with pip, then run the guided installer:
 
 ```console
-python -m pip install pload
+python -m pip install --user --upgrade pload
+python -m pload.installer
 ```
 
-Enable activation in your shell by adding one line to its profile:
+Using the Tsinghua PyPI mirror for the bootstrap package:
 
-```bash
-# Bash (~/.bashrc)
-eval "$(python_virtual_env_load shell-init bash)"
-
-# Zsh (~/.zshrc)
-eval "$(python_virtual_env_load shell-init zsh)"
-
-# Fish (~/.config/fish/config.fish)
-python_virtual_env_load shell-init fish | source
+```console
+python -m pip install --user --upgrade pload \
+  -i https://pypi.tuna.tsinghua.edu.cn/simple
+python -m pload.installer --pip-source tsinghua
 ```
 
-For PowerShell, add this to `$PROFILE`:
+On Windows, `py` can replace `python`:
 
 ```powershell
-Invoke-Expression (& python_virtual_env_load shell-init powershell | Out-String)
+py -m pip install --user --upgrade pload
+py -m pload.installer
 ```
 
-This explicit setup keeps package installation side-effect free.
+The installer asks for:
+
+- the pload data directory;
+- the stable executable `bin` directory;
+- the managed virtual-environment directory;
+- the downloaded Python directory;
+- the Python runtime download source;
+- the Python package index;
+- whether to update a shell profile.
+
+It then creates a private runtime under `PLOAD_HOME/runtime` and writes a stable
+`pload` executable into the selected `bin` directory. The executable does not
+depend on a project virtual environment, so deleting or activating an
+environment managed by pload cannot remove or shadow the tool itself.
+
+For a fully non-interactive installation:
+
+```console
+python -m pload.installer --yes \
+  --home /mnt/tools/pload \
+  --bin-dir ~/.local/bin \
+  --venvs-dir /mnt/venvs \
+  --python-dir /mnt/python \
+  --source ustc \
+  --pip-source tsinghua
+```
+
+`--yes` never edits a shell profile unless `--shell` is also supplied.
+
+If `pipx` is already available, `pipx install pload` is the shortest isolated
+installation. Run `pload-install` afterward only when you want the guided
+directory and Python-source configuration.
+
+## Shell activation
+
+The guided installer can add the initialization block. To configure it
+manually:
+
+```bash
+# Bash
+eval "$(pload shell-init bash)"
+
+# Zsh
+eval "$(pload shell-init zsh)"
+
+# Fish
+pload shell-init fish | source
+```
+
+PowerShell:
+
+```powershell
+Invoke-Expression (& pload shell-init powershell | Out-String)
+```
+
+## Python versions without pyenv
+
+pload uses `uv` as its default managed-Python backend. The guided installer
+places uv in pload's private runtime, while Python installations and caches go
+to the configured pload directories.
+
+```console
+pload python install 3.12
+pload python list
+pload python path 3.12
+pload new --name data --version 3.12
+```
+
+Python itself does not publish one portable binary distribution covering all
+supported platforms. uv therefore uses the CPython builds from Astral's
+`python-build-standalone` project.
+
+Available runtime source choices:
+
+- `official`: Astral's GitHub releases;
+- `ustc`: the documented USTC GitHub-release mirror;
+- `custom`: any compatible HTTPS mirror or local `file://` mirror.
+
+Examples:
+
+```console
+# USTC runtime mirror
+python -m pload.installer --yes --no-runtime-install --source ustc
+
+# Private mirror with uv-compatible directory layout
+python -m pload.installer --yes --no-runtime-install \
+  --source custom \
+  --mirror-url https://mirror.example/python-build-standalone/releases/download
+
+# Fully custom uv download metadata
+python -m pload.installer --yes --no-runtime-install \
+  --source custom \
+  --mirror-url file:///mnt/mirror \
+  --downloads-json-url /mnt/mirror/python-downloads.json
+```
+
+Mirror configuration is stored in `PLOAD_HOME/config.json` and applied only to
+pload operations. It does not need to be exported globally from a shell
+profile. Use `pload config show` to inspect the effective configuration.
+
+Third-party mirrors are availability and trust choices made by the user. pload
+does not disable uv's normal archive metadata and integrity handling.
 
 ## Create and activate environments
 
 ```console
-pload new --name data                 # current Python
-pload new --name web --version 3.12   # pyenv or PATH Python
+pload new --name data                 # private-runtime Python
+pload new --name web --version 3.12   # managed, PATH, or pyenv Python
 pload data                            # activate
 
 pload init                            # create .venv here
@@ -58,22 +156,21 @@ export PLOAD_HOME=/mnt/workspace/.pload
 pload new --name tools
 ```
 
-The resulting layout is:
+The guided layout is:
 
 ```text
-/mnt/workspace/.pload/
+PLOAD_HOME/
+├── config.json
+├── runtime/       # pload and uv only
+├── pythons/       # downloaded Python runtimes
+├── python-bin/    # links to managed Python executables
+├── cache/python/
 ├── state/
 └── venvs/
-    └── tools/
 ```
 
-Override roots independently with `PLOAD_VENVS_DIR` and `PLOAD_STATE_DIR`, or
-use the global `--home`, `--venvs-dir`, and `--state-dir` options.
-
-Existing 0.3 installations are detected automatically: if `~/venvs` contains
-the old scripts, state file, or virtual environments and no new path is
-configured, pload continues using it. Set `PLOAD_HOME` when you are ready to
-move to the isolated layout.
+Override roots with `PLOAD_VENVS_DIR` and `PLOAD_STATE_DIR`, or the global
+`--home`, `--venvs-dir`, and `--state-dir` options.
 
 Projects and virtual environments can be placed independently:
 
@@ -83,31 +180,36 @@ pload init \
   --venv-dir /mnt/environments/example
 ```
 
-A relative `--venv-dir` is resolved relative to `--project-dir`:
+Existing 0.3 installations are detected automatically when a populated
+`~/venvs` is present and no explicit path has been configured.
+
+## Discover commands
 
 ```console
-pload init --project-dir ./example --venv-dir .runtime/python
+pload -h
+pload new -h
+pload init -h
+pload python -h
+pload-install -h
 ```
 
-## Other commands
+Other useful commands:
 
 ```console
-pload list                       # managed environments
-pload list --python-versions     # versions installed under PYENV_ROOT
-pload path data                  # absolute environment path
-pload rm data                    # confirm by typing its name
-pload rm data --yes              # non-interactive removal
-pload rm --expression '^test-'   # select managed environments with a regex
+pload list
+pload path data
+pload rm data
+pload rm data --yes
+pload rm --expression '^test-'
+pload config show
 ```
-
-`PYENV_ROOT` and `PYENV_HOME` are respected. If pyenv is on `PATH`, `pload`
-can ask it for an interpreter. Installing Python itself remains explicit.
 
 ## Development
 
 ```console
 python -m pip install -e '.[test]'
 pytest
+ruff check src tests
 ```
 
 ## License

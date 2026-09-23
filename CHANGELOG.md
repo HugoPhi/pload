@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.5.0 - 2026-09-23
+
+### Added
+
+- Guided `pload-install` setup for the data, executable, environment, Python,
+  cache, package-index, and shell-integration locations.
+- A private pload runtime plus stable `bin/pload` launcher that is independent
+  from project virtual environments.
+- uv-backed `pload python install`, `list`, and `path` commands.
+- Official, USTC, custom HTTPS, local `file://`, and custom-download-metadata
+  options for managed Python runtimes.
+- Persistent `PLOAD_HOME/config.json` configuration and `pload config show`.
+- Expanded top-level and command-specific help with practical examples.
+
+### Changed
+
+- uv-managed Python is preferred over pyenv when a requested version is
+  available; pyenv remains a compatible fallback.
+- Shell integration calls the stable `pload` launcher directly.
+
 ## 0.4.1 - 2026-09-23
 
 ### Fixed

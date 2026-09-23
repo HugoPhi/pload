@@ -1,4 +1,5 @@
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -14,7 +15,24 @@ from pload.managers.venv import VenvManager
 def build_parser():
     parser = argparse.ArgumentParser(
         prog="pload",
-        description="Create and activate relocatable Python virtual environments.",
+        description=(
+            "Create, activate, and remove Python virtual environments without tying "
+            "pload itself to any project environment."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Typical workflow:
+  pload python install 3.12        Download a managed Python when needed
+  pload new --name data -v 3.12   Create a managed environment
+  pload data                       Activate it (after shell initialization)
+  pload init                       Create .venv for the current project
+  pload .                          Activate the project environment
+
+Isolation:
+  PLOAD_HOME=/mnt/pload pload list
+  pload --venvs-dir /mnt/venvs new --name tools
+  pload init --project-dir ./app --venv-dir /mnt/venvs/app
+
+Run `pload <command> -h` for command-specific examples.""",
     )
     parser.add_argument("--home", help="data root (or set PLOAD_HOME)")
     parser.add_argument("--venvs-dir", help="managed environment root (or PLOAD_VENVS_DIR)")
@@ -22,14 +40,36 @@ def build_parser():
     parser.add_argument("--version", action="version", version=f"pload {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    new = subparsers.add_parser("new", help="create a managed environment")
+    new = subparsers.add_parser(
+        "new", help="create a managed environment",
+        description=(
+            "Create a virtual environment under the configured managed root, or at an "
+            "explicit --path. The current Python is used when --version is omitted."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Examples:
+  pload new --name tools
+  pload new --name data --version 3.12 -r numpy pandas
+  pload new --path /mnt/venvs/build --version /opt/python/bin/python""",
+    )
     new.add_argument("--version", "-v", dest="python_version")
     new.add_argument("--message", "-m", default="normal")
     new.add_argument("--name", help="exact environment name")
     new.add_argument("--path", help="exact destination instead of the managed root")
     add_packages(new)
 
-    init = subparsers.add_parser("init", help="create an environment for a project")
+    init = subparsers.add_parser(
+        "init", help="create an environment for a project",
+        description=(
+            "Create a project environment. A relative --venv-dir is resolved against "
+            "--project-dir, so the command behaves consistently from any directory."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Examples:
+  pload init
+  pload init --project-dir ./service --venv-dir .runtime/python
+  pload init --project-dir /srv/app --venv-dir /mnt/venvs/app -v 3.12""",
+    )
     init.add_argument("--version", "-v", dest="python_version")
     init.add_argument("--project-dir", default=".", help="project directory (default: current)")
     init.add_argument(
@@ -38,14 +78,34 @@ def build_parser():
     )
     add_packages(init)
 
-    remove = subparsers.add_parser("rm", aliases=["remove"], help="remove environments")
+    remove = subparsers.add_parser(
+        "rm", aliases=["remove"], help="remove environments",
+        description=(
+            "Remove named environments or select managed environments with a regular "
+            "expression. Active environments and symbolic links are never removed."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Examples:
+  pload rm data
+  pload rm data test --yes
+  pload rm --expression '^temporary-' --yes
+  pload rm . --project-dir /srv/app""",
+    )
     remove.add_argument("names", nargs="*")
     remove.add_argument("--envs", "-n", nargs="+", default=[])
     remove.add_argument("--expression", "-e", "-re")
     remove.add_argument("--project-dir", default=".")
     remove.add_argument("--yes", "-y", action="store_true")
 
-    listing = subparsers.add_parser("list", help="list managed environments")
+    listing = subparsers.add_parser(
+        "list", help="list managed environments",
+        description="List valid environments under the configured managed root.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Examples:
+  pload list
+  pload list --expression '^3\\.12-'
+  pload list --python-versions""",
+    )
     listing.add_argument("--expression", "-e", "-re", default=".*")
     listing.add_argument("--python-versions", "--version", "-v", action="store_true")
 
@@ -58,6 +118,33 @@ def build_parser():
         "shell-init", help="print shell integration; evaluate it from your profile"
     )
     shell_init.add_argument("shell", choices=["bash", "zsh", "fish", "powershell"])
+
+    python = subparsers.add_parser(
+        "python", help="install and inspect Python runtimes",
+        description=(
+            "Manage isolated Python runtimes through uv. Downloads are stored under "
+            "PLOAD_HOME by default and respect the mirror selected by pload-install."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Examples:
+  pload python install 3.12
+  pload python install 3.12.8
+  pload python list
+  pload python path 3.12
+
+Run `pload config show` to inspect the download source and install directory.""",
+    )
+    python_commands = python.add_subparsers(dest="python_command", required=True)
+    python_install = python_commands.add_parser(
+        "install", help="download a Python runtime with the configured source"
+    )
+    python_install.add_argument("version", help="version request, for example 3.12 or 3.12.8")
+    python_commands.add_parser("list", help="list managed and compatible pyenv runtimes")
+    python_path = python_commands.add_parser("path", help="resolve an installed interpreter")
+    python_path.add_argument("version")
+
+    config = subparsers.add_parser("config", help="inspect effective configuration")
+    config.add_argument("action", nargs="?", choices=["show"], default="show")
     return parser
 
 
@@ -70,12 +157,12 @@ def shell_script(shell):
     if shell in {"bash", "zsh"}:
         return r'''pload() {
     case "${1:-}" in
-        new|init|rm|remove|list|path|shell-init|-*)
-            command python_virtual_env_load "$@"
+        new|init|rm|remove|list|path|shell-init|python|config|-*)
+            command pload "$@"
             ;;
         *)
             local activate_path
-            activate_path="$(command python_virtual_env_load path "${1:-.}" --shell ''' + shell + r''')" || return $?
+            activate_path="$(command pload path "${1:-.}" --shell ''' + shell + r''')" || return $?
             source "$activate_path"
             ;;
     esac
@@ -83,27 +170,29 @@ def shell_script(shell):
     if shell == "fish":
         return r'''function pload
     switch "$argv[1]"
-        case new init rm remove list path shell-init '-*'
-            command python_virtual_env_load $argv
+        case new init rm remove list path shell-init python config '-*'
+            command pload $argv
         case '*'
             set -l name .
             if test (count $argv) -gt 0
                 set name $argv[1]
             end
-            set -l activate_path (command python_virtual_env_load path "$name" --shell fish)
+            set -l activate_path (command pload path "$name" --shell fish)
             or return $status
             source "$activate_path"
     end
 end'''
     return r'''function pload {
     param([Parameter(ValueFromRemainingArguments = $true)][string[]]$PloadArgs)
-    $commands = @('new', 'init', 'rm', 'remove', 'list', 'path', 'shell-init', '-h', '--help', '--version')
+    $commands = @('new', 'init', 'rm', 'remove', 'list', 'path', 'shell-init', 'python', 'config', '-h', '--help', '--version')
+    $backend = Get-Command -Name @('pload.exe', 'pload.cmd') -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $backend) { throw 'pload executable not found on PATH' }
     if ($PloadArgs.Count -gt 0 -and ($commands -contains $PloadArgs[0] -or $PloadArgs[0].StartsWith('-'))) {
-        python_virtual_env_load @PloadArgs
+        & $backend.Source @PloadArgs
         return
     }
     $name = if ($PloadArgs.Count -eq 0) { '.' } else { $PloadArgs[0] }
-    $activatePath = python_virtual_env_load path $name --shell powershell
+    $activatePath = & $backend.Source path $name --shell powershell
     if ($LASTEXITCODE -eq 0) { . $activatePath }
 }'''
 
@@ -175,6 +264,28 @@ def run(argv=None):
 
     if args.command == "shell-init":
         print(shell_script(args.shell))
+        return 0
+
+    if args.command == "python":
+        manager = PythonManager(config)
+        if args.python_command == "install":
+            manager.install_python(args.version)
+        elif args.python_command == "list":
+            for version in manager.get_installed_versions():
+                print(version)
+        elif args.python_command == "path":
+            print(config.get_python_path(args.version))
+        return 0
+
+    if args.command == "config":
+        effective = dict(config.settings)
+        effective.update({
+            "home": str(config.home),
+            "venvs_dir": str(config.venv_path),
+            "state_dir": str(config.state_path),
+            "python": config.python,
+        })
+        print(json.dumps(effective, ensure_ascii=False, indent=2))
         return 0
 
     return 0

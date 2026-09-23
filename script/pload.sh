@@ -1,2 +1,2 @@
 # Compatibility file for users who prefer sourcing a script directly.
-eval "$(python_virtual_env_load shell-init bash)"
+eval "$(pload shell-init bash)"

@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from pload.settings import load_settings, python_settings
+
 
 class PythonNotFoundError(RuntimeError):
     pass
@@ -16,9 +18,14 @@ class ConfigManager:
     def __init__(self, home=None, venvs_dir=None, state_dir=None):
         configured_home = home or os.environ.get("PLOAD_HOME")
         self.home = Path(configured_home or Path.home() / ".pload").expanduser().resolve()
+        self.settings = load_settings(self.home)
 
-        configured_venvs = venvs_dir or os.environ.get("PLOAD_VENVS_DIR")
-        configured_state = state_dir or os.environ.get("PLOAD_STATE_DIR")
+        configured_venvs = (
+            venvs_dir or os.environ.get("PLOAD_VENVS_DIR") or self.settings.get("venvs_dir")
+        )
+        configured_state = (
+            state_dir or os.environ.get("PLOAD_STATE_DIR") or self.settings.get("state_dir")
+        )
         if configured_venvs:
             resolved_venvs = Path(configured_venvs)
         else:
@@ -35,6 +42,7 @@ class ConfigManager:
         self.pyenv_path = Path(configured_pyenv or Path.home() / ".pyenv").expanduser()
         self.pyenv_exe = shutil.which("pyenv")
         self.pyenv_versions = self.pyenv_path / "versions"
+        self.python = python_settings(self.home, self.settings)
 
     @staticmethod
     def _looks_like_legacy_root(path):
@@ -72,6 +80,10 @@ class ConfigManager:
         if candidate.is_file():
             return candidate.resolve()
 
+        managed = self.find_managed_python(version)
+        if managed:
+            return managed
+
         direct = self._python_in(self.pyenv_versions / version)
         if direct.is_file():
             return direct.resolve()
@@ -97,8 +109,77 @@ class ConfigManager:
 
         raise PythonNotFoundError(
             f"Python {version!r} was not found. Install it with pyenv, pass an "
-            "interpreter path, or omit --version to use the current Python."
+            f"interpreter path, run 'pload python install {version}', or omit "
+            "--version to use the current Python."
         )
+
+    def managed_python_candidates(self):
+        root = Path(self.python["install_dir"]).expanduser()
+        if not root.is_dir():
+            return []
+        candidates = []
+        for path in root.rglob("python*"):
+            if (
+                path.is_file()
+                and self._is_python_executable_name(path.name)
+                and os.access(path, os.X_OK)
+            ):
+                candidates.append(path)
+        return sorted(set(candidates))
+
+    @staticmethod
+    def _is_python_executable_name(name, platform=None):
+        platform = platform or sys.platform
+        normalized = name.lower()
+        if platform == "win32":
+            return bool(
+                re.fullmatch(r"python(?:3(?:\.\d+)?)?\.exe", normalized)
+            )
+        return bool(re.fullmatch(r"python(?:3(?:\.\d+)?)?", name))
+
+    def find_managed_python(self, version):
+        requested = str(version)
+        for prefix in ("cpython@", "cpython-"):
+            if requested.startswith(prefix):
+                requested = requested[len(prefix):]
+        for candidate in self.managed_python_candidates():
+            try:
+                result = subprocess.run(
+                    [str(candidate), "--version"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+            except OSError:
+                continue
+            output = (result.stdout or result.stderr).strip()
+            if result.returncode == 0 and output.startswith(f"Python {requested}"):
+                return candidate.resolve()
+        return None
+
+    def uv_executable(self):
+        executable = "uv.exe" if sys.platform == "win32" else "uv"
+        runtime_dir = "Scripts" if sys.platform == "win32" else "bin"
+        private = self.home / "runtime" / runtime_dir / executable
+        if private.is_file():
+            return private
+        found = shutil.which("uv")
+        return Path(found).resolve() if found else None
+
+    def uv_environment(self):
+        env = os.environ.copy()
+        env["UV_PYTHON_INSTALL_DIR"] = str(Path(self.python["install_dir"]).expanduser())
+        env["UV_PYTHON_BIN_DIR"] = str(Path(self.python["bin_dir"]).expanduser())
+        env["UV_PYTHON_CACHE_DIR"] = str(Path(self.python["cache_dir"]).expanduser())
+        mirror = self.python.get("mirror")
+        downloads = self.python.get("downloads_json_url")
+        if mirror:
+            env["UV_PYTHON_INSTALL_MIRROR"] = mirror
+        else:
+            env.pop("UV_PYTHON_INSTALL_MIRROR", None)
+        if downloads:
+            env["UV_PYTHON_DOWNLOADS_JSON_URL"] = downloads
+        return env
 
     @staticmethod
     def venv_python(venv_path):

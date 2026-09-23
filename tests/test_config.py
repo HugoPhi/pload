@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 
 from pload.managers.platform import ConfigManager
+from pload.settings import save_settings
 
 
 def test_explicit_paths_are_fully_isolated(tmp_path):
@@ -60,3 +61,42 @@ def test_explicit_home_never_falls_back_to_legacy(monkeypatch, tmp_path):
     config = ConfigManager(home=tmp_path / "portable")
 
     assert config.venv_path == (tmp_path / "portable" / "venvs").resolve()
+
+
+def test_saved_configuration_controls_all_managed_roots(tmp_path):
+    home = tmp_path / "pload"
+    save_settings(home, {
+        "venvs_dir": str(tmp_path / "envs"),
+        "state_dir": str(tmp_path / "state"),
+        "python": {
+            "install_dir": str(tmp_path / "python"),
+            "mirror": "https://mirror.example/releases/download",
+        },
+    })
+
+    config = ConfigManager(home=home)
+
+    assert config.venv_path == (tmp_path / "envs").resolve()
+    assert config.state_path == (tmp_path / "state").resolve()
+    assert config.python["install_dir"] == str(tmp_path / "python")
+    assert config.python["mirror"] == "https://mirror.example/releases/download"
+
+
+def test_managed_python_names_exclude_windows_libraries():
+    matches = ConfigManager._is_python_executable_name
+
+    assert matches("python.exe", "win32")
+    assert matches("python3.exe", "win32")
+    assert matches("python3.12.exe", "win32")
+    assert not matches("python3.dll", "win32")
+    assert not matches("python312.dll", "win32")
+    assert not matches("pythonw.exe", "win32")
+
+
+def test_managed_python_names_match_versioned_unix_executables():
+    matches = ConfigManager._is_python_executable_name
+
+    assert matches("python", "linux")
+    assert matches("python3", "darwin")
+    assert matches("python3.12", "linux")
+    assert not matches("python3.pc", "linux")

@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pload"
+version = "0.4.0"
+description = "A small, relocatable Python virtual environment manager"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Yunming Hu", email = "hugonelsonm3@gmail.com" }]
+keywords = ["python", "venv", "virtual-environment", "pyenv"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+]
+
+[project.scripts]
+python_virtual_env_load = "pload.cli:main"
+
+[project.optional-dependencies]
+test = ["pytest>=7", "ruff>=0.9"]
+
+[project.urls]
+Homepage = "https://github.com/HugoPhi/pload"
+Issues = "https://github.com/HugoPhi/pload/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py38"
+line-length = 100

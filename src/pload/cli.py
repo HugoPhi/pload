@@ -1,260 +1,192 @@
-import os
-import re
 import argparse
-import argcomplete
-from pload.managers.color import Colors
-from pload.managers.platform import ConfigManager
+import re
+import sys
+from pathlib import Path
+
+from pload import __version__
+from pload.errors import PloadError
+from pload.managers.dependency import DependencyManager
+from pload.managers.platform import ConfigManager, PythonNotFoundError
 from pload.managers.pyversion import PythonManager
 from pload.managers.venv import VenvManager
-from pload.managers.dependency import DependencyManager
 
 
-support_cmds = ['new', 'init', 'rm', 'cp', 'list']
-
-
-def main():
-    platform_mgr = ConfigManager()
-    python_mgr = PythonManager(platform_mgr)
-    venv_mgr = VenvManager(platform_mgr)
-    dep_mgr = DependencyManager(platform_mgr)
-
+def build_parser():
     parser = argparse.ArgumentParser(
-        description='A Minimal Python Venv Manage Tool. You can run '
-                    f'{Colors.yellow("`pload [venv name]`")} to set '
-                    f'{Colors.green("gloal venv")} and use '
-                    f'{Colors.yellow("`activate`")} to activate the venv you set; and if there is '
-                    f'{Colors.green(".venv")} under your path you can use '
-                    f'{Colors.yellow("`pload .`")} to set and '
-                    f'{Colors.yellow("`activate`")} to activate.',
-        add_help=False
+        prog="pload",
+        description="Create and activate relocatable Python virtual environments.",
     )
+    parser.add_argument("--home", help="data root (or set PLOAD_HOME)")
+    parser.add_argument("--venvs-dir", help="managed environment root (or PLOAD_VENVS_DIR)")
+    parser.add_argument("--state-dir", help="state root (or PLOAD_STATE_DIR)")
+    parser.add_argument("--version", action="version", version=f"pload {__version__}")
+    subparsers = parser.add_subparsers(dest="command", required=True)
 
-    parser.add_argument('--help', '-h', action='store_true', help='Help.')
-    args, all = parser.parse_known_args()
+    new = subparsers.add_parser("new", help="create a managed environment")
+    new.add_argument("--version", "-v", dest="python_version")
+    new.add_argument("--message", "-m", default="normal")
+    new.add_argument("--name", help="exact environment name")
+    new.add_argument("--path", help="exact destination instead of the managed root")
+    add_packages(new)
 
-    subparsers = parser.add_subparsers(dest='command', title='commands')
+    init = subparsers.add_parser("init", help="create an environment for a project")
+    init.add_argument("--version", "-v", dest="python_version")
+    init.add_argument("--project-dir", default=".", help="project directory (default: current)")
+    init.add_argument(
+        "--venv-dir", default=".venv",
+        help="environment path, relative to --project-dir or absolute",
+    )
+    add_packages(init)
 
-    # new 子命令
-    new_subparser = subparsers.add_parser(
-        'new',
-        help=f'Create a new virtual env under {Colors.green("global")} venv floder.'
-    )
-    new_subparser.add_argument(
-        '--message', '-m',
-        help='Venv message, the global name will be: '
-             f'{Colors.yellow("<version>")}-{Colors.yellow("<message>")}, e.g. '
-             f'{Colors.yellow("`pload new -m myvenv -v 3.8.10`")} get: '
-             f'{Colors.green("3.8.10-myenv")}',
-        default='normal'
-    )
-    new_subparser.add_argument(
-        '--version', '-v',
-        help=f'{Colors.green("Python version")} this venv uses.'
-    )
-    new_subparser.add_argument(
-        '--channel', '-c',
-        help='Channel while downloading requirements.'
-    )
-    new_subparser.add_argument(
-        '--requirements', '-r', nargs='+',
-        help=f'{Colors.green("Requirements")} needed to install for this venv. e.g. '
-        f'{Colors.yellow("`pload new -m myvenv -v 3.8.10 -r numpy matplotlib pandas`")}'
-    )
+    remove = subparsers.add_parser("rm", aliases=["remove"], help="remove environments")
+    remove.add_argument("names", nargs="*")
+    remove.add_argument("--envs", "-n", nargs="+", default=[])
+    remove.add_argument("--expression", "-e", "-re")
+    remove.add_argument("--project-dir", default=".")
+    remove.add_argument("--yes", "-y", action="store_true")
 
-    # init 子命令
-    init_subparser = subparsers.add_parser(
-        'init',
-        help=f'Create a new virtual env under {Colors.green("current")} folder.'
-    )
-    init_subparser.add_argument(
-        '--version', '-v',
-        help='python version this venv uses.'
-    )
-    init_subparser.add_argument(
-        '--channel', '-c',
-        help='Channel for downloading requirements.'
-    )
-    init_subparser.add_argument(
-        '--requirements', '-r', nargs='+',
-        help='Requirements needed for this venv.'
-    )
+    listing = subparsers.add_parser("list", help="list managed environments")
+    listing.add_argument("--expression", "-e", "-re", default=".*")
+    listing.add_argument("--python-versions", "--version", "-v", action="store_true")
 
-    # rm 子命令
-    rm_subparser = subparsers.add_parser('rm', help='Remove virtual envs.')
-    rm_subparser.add_argument(
-        '--envs', '-n', nargs='+',
-        help='envs to remove'
-    )
-    rm_subparser.add_argument(
-        '--expression', '-re',
-        help=f'use {Colors.green("regulation expression")} to remove venvs.'
-    )
+    path = subparsers.add_parser("path", help="print an environment or activation path")
+    path.add_argument("name")
+    path.add_argument("--project-dir", default=".")
+    path.add_argument("--shell", choices=["bash", "zsh", "fish", "powershell"])
 
-    # cp 子命令
-    cp_subparser = subparsers.add_parser('cp', help='Copy one venv to another.')
-    cp_subparser.add_argument(
-        '--from', '-f',
-        help='from which venv name'
+    shell_init = subparsers.add_parser(
+        "shell-init", help="print shell integration; evaluate it from your profile"
     )
-    cp_subparser.add_argument(
-        '--to', '-t',
-        help="copy to which venv, if use '.' represents for current folder."
-    )
+    shell_init.add_argument("shell", choices=["bash", "zsh", "fish", "powershell"])
+    return parser
 
-    # list 子命令
-    list_subparser = subparsers.add_parser(
-        'list',
-        help='List global venvs & python versions(-v), support regulation expression.'
-    )
-    list_subparser.add_argument(
-        '--expression', '-re',
-        help=f'{Colors.green("regulation expression")} for searching.',
-        default='.*'
-    )
-    list_subparser.add_argument(
-        '--version', '-v',
-        help='list python versions',
-        action='store_true'
-    )
 
-    if len(all) == 0:
-        cmds = '{' + str(support_cmds).strip('[]').replace("'", "") + '}'
-        parser.usage = f"{parser.prog} [venv name] [-h] {cmds} ..."
-        parser.print_help()
-        exit(0)
+def add_packages(parser):
+    parser.add_argument("--channel", "-c", help="Python package index URL")
+    parser.add_argument("--requirements", "-r", nargs="+", help="packages to install")
 
-    if all[0] not in support_cmds:
-        if len(all) == 1:
-            env_name = all[0]
-            venv_mgr.set_current_venv(env_name)
-            exit(0)
+
+def shell_script(shell):
+    if shell in {"bash", "zsh"}:
+        return r'''pload() {
+    case "${1:-}" in
+        new|init|rm|remove|list|path|shell-init|-*)
+            command python_virtual_env_load "$@"
+            ;;
+        *)
+            local activate_path
+            activate_path="$(command python_virtual_env_load path "${1:-.}" --shell ''' + shell + r''')" || return $?
+            source "$activate_path"
+            ;;
+    esac
+}'''
+    if shell == "fish":
+        return r'''function pload
+    switch "$argv[1]"
+        case new init rm remove list path shell-init '-*'
+            command python_virtual_env_load $argv
+        case '*'
+            set -l name .
+            if test (count $argv) -gt 0
+                set name $argv[1]
+            end
+            set -l activate_path (command python_virtual_env_load path "$name" --shell fish)
+            or return $status
+            source "$activate_path"
+    end
+end'''
+    return r'''function pload {
+    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$PloadArgs)
+    $commands = @('new', 'init', 'rm', 'remove', 'list', 'path', 'shell-init', '-h', '--help', '--version')
+    if ($PloadArgs.Count -gt 0 -and ($commands -contains $PloadArgs[0] -or $PloadArgs[0].StartsWith('-'))) {
+        python_virtual_env_load @PloadArgs
+        return
+    }
+    $name = if ($PloadArgs.Count -eq 0) { '.' } else { $PloadArgs[0] }
+    $activatePath = python_virtual_env_load path $name --shell powershell
+    if ($LASTEXITCODE -eq 0) { . $activatePath }
+}'''
+
+
+def run(argv=None):
+    args = build_parser().parse_args(argv)
+    config = ConfigManager(args.home, args.venvs_dir, args.state_dir)
+    venvs = VenvManager(config)
+    dependencies = DependencyManager(config)
+
+    if args.command == "new":
+        path = venvs.create_venv(
+            version=args.python_version,
+            message=args.message,
+            target=args.path,
+            name=args.name,
+        )
+        dependencies.install_dependencies(path, args.requirements, args.channel)
+        return 0
+
+    if args.command == "init":
+        project = Path(args.project_dir).expanduser().resolve()
+        project.mkdir(parents=True, exist_ok=True)
+        path = venvs.create_venv(
+            version=args.python_version,
+            is_local=True,
+            project_dir=project,
+            target=args.venv_dir,
+        )
+        dependencies.install_dependencies(path, args.requirements, args.channel)
+        return 0
+
+    if args.command in {"rm", "remove"}:
+        names = list(dict.fromkeys(args.names + args.envs))
+        if args.expression:
+            pattern = re.compile(args.expression)
+            names.extend(name for name in venvs.get_existing_venvs() if pattern.fullmatch(name))
+            names = list(dict.fromkeys(names))
+        if not names:
+            raise PloadError("no environments selected")
+        for name in names:
+            if not args.yes:
+                confirmation = input(f"Remove {name!r}? Type its name to confirm: ")
+                if confirmation != name:
+                    raise PloadError("removal cancelled")
+            venvs.remove_venv(name, project_dir=args.project_dir)
+        return 0
+
+    if args.command == "list":
+        pattern = re.compile(args.expression)
+        if args.python_versions:
+            for version in PythonManager(config).get_installed_versions():
+                if pattern.fullmatch(version):
+                    print(version)
         else:
-            print(f'[!] you can only activate {Colors.red("one venv once")}. But get: {all}')
-            exit(1)
+            for name in venvs.get_existing_venvs():
+                if pattern.fullmatch(name):
+                    print(name)
+        return 0
 
-    argcomplete.autocomplete(parser)
-    args = parser.parse_known_args()[0]
+    if args.command == "path":
+        if args.shell:
+            print(venvs.activation_script(
+                args.name, shell=args.shell, project_dir=args.project_dir
+            ))
+        else:
+            print(venvs.resolve_existing(args.name, project_dir=args.project_dir))
+        return 0
 
-    if all[0] == 'new':
-        message = args.message
-        version = args.version
-        requirements = args.requirements
-        channel = args.channel
+    if args.command == "shell-init":
+        print(shell_script(args.shell))
+        return 0
 
-        if version is None or args.help:
-            print(f'[!] {Colors.red("version")} is must.')
-            print()
-            new_subparser.print_help()
-            exit(1)
-
-        venv_path = venv_mgr.create_venv(
-            version=version,
-            message=message,
-            is_local=False
-        )
-        if requirements:
-            dep_mgr.install_dependencies(
-                venv_path=venv_path,
-                requirements=requirements,
-                channel=channel
-            )
-
-    elif all[0] == 'init':
-        version = args.version
-        requirements = args.requirements
-        channel = args.channel
-
-        if version is None:
-            print(f'[!] {Colors.red("version")} is must.')
-            print()
-            init_subparser.print_help()
-            exit(1)
-
-        venv_path = venv_mgr.create_venv(
-            version=version,
-            is_local=True
-        )
-        if requirements:
-            dep_mgr.install_dependencies(
-                venv_path=venv_path,
-                requirements=requirements,
-                channel=channel
-            )
-
-    elif all[0] == 'rm':
-        envs = args.envs if args.envs else []
-        expr = args.expression if args.expression else '^$'
-        venvs = venv_mgr.get_existing_venvs()
-
-        envs += [x for x in venvs if re.fullmatch(expr, x)]
-
-        if len(envs) == 0:
-            print(f'[!] {Colors.red("venvs to remove is empty!")}')
-            print()
-            rm_subparser.print_help()
-            exit(1)
-
-        for env in envs:
-            if env == '.':
-                if not os.path.exists(os.path.join(os.getcwd(), '.venv')):
-                    print('[!] There are not local venv.')
-                    exit(1)
-
-                user_input = input(f'Are you sure to remove {Colors.green("local -> " + os.path.join(os.getcwd(), ".venv"))}(Y/N): ')
-                if user_input in ['Y', 'y']:
-                    venv_mgr.remove_venv('.')
-                    print(f'[*] .venv -> {Colors.green(os.path.join(os.getcwd(), ".venv"))} is removed.')
-                    exit(0)
-                else:
-                    print('[!] Remove aborted.')
-                    exit(1)
-            elif env in venvs:
-                user_input = input(f'please input {Colors.green(env)} to remove it: ')
-                if user_input == env:
-                    venv_mgr.remove_venv(env)
-                else:
-                    print(f'[!] input and {Colors.green(env)} is not match')
-                    exit(1)
-            else:
-                print(f'[!] {env} is not in global envs')
-                exit(1)
-
-            print(f'[*] {Colors.green(env)} is successfully uninstalled.')
-
-    elif all[0] == 'cp':
-        print('TODO')
-
-    elif all[0] == 'list':
-        if args.version is True:
-            print(f'[*] {Colors.green("Python versions")} in pyenv:')
-            print()
-
-            expr = args.expression
-            for v in python_mgr.get_installed_versions():
-                if re.fullmatch(expr, v):
-                    print(f'    {v}')
-            return
-
-        expr = args.expression
-        CUR = platform_mgr.rdvenv('CUR')
-
-        print(f'[*] {Colors.green("Virtual envs")} managed by pload:')
-        print()
-
-        if CUR is not None:
-            if CUR[0] == '.':
-                print(f' >  {Colors.yellow(CUR)}')
-
-            if os.path.exists(os.path.join(os.getcwd(), '.venv')):
-                if CUR[9:] != os.path.join(os.getcwd(), '.venv'):
-                    print(f'    local -> {os.path.join(os.getcwd(), ".venv")}')
-
-        for venv in venv_mgr.get_existing_venvs():
-            if venv == CUR:
-                print(f' >  {Colors.yellow(CUR)}')
-            elif re.fullmatch(expr, venv):
-                print(f'    {venv}')
+    return 0
 
 
-if __name__ == '__main__':
-    main()
+def main(argv=None):
+    try:
+        return run(argv)
+    except (PloadError, PythonNotFoundError, re.error) as exc:
+        print(f"pload: error: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

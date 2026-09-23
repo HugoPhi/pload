@@ -1,14 +1,31 @@
-from colorama import Fore, Style, init
-
-init(autoreset=True)  # 启用颜色
+import os
+import sys
 
 
 class Colors:
-    def green(x):
-        return Fore.GREEN + Style.BRIGHT + x + Style.RESET_ALL
+    """Small color helper that stays quiet when output is redirected."""
 
-    def red(x):
-        return Fore.RED + Style.BRIGHT + x + Style.RESET_ALL
+    enabled = sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
 
-    def yellow(x):
-        return Fore.YELLOW + Style.BRIGHT + x + Style.RESET_ALL
+    @classmethod
+    def _paint(cls, value, color):
+        text = str(value)
+        if not cls.enabled:
+            return text
+        return f"\033[1;{color}m{text}\033[0m"
+
+    @classmethod
+    def green(cls, value):
+        return cls._paint(value, "32")
+
+    @classmethod
+    def red(cls, value):
+        return cls._paint(value, "31")
+
+    @classmethod
+    def yellow(cls, value):
+        return cls._paint(value, "33")
+
+    @classmethod
+    def cyan(cls, value):
+        return cls._paint(value, "36")

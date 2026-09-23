@@ -1,150 +1,159 @@
 import os
 import re
-import sys
+import shutil
 import subprocess
+import sys
+from pathlib import Path
+
+
+class PythonNotFoundError(RuntimeError):
+    pass
 
 
 class ConfigManager:
-    def __init__(self):
-        # 基础路径配置
-        self.venv_path = os.path.join(os.path.expanduser("~"), 'venvs')
+    """Resolve pload paths and interpreters without hard-coded platform paths."""
 
-        # 平台标识（win32/linux）
+    def __init__(self, home=None, venvs_dir=None, state_dir=None):
+        configured_home = home or os.environ.get("PLOAD_HOME")
+        self.home = Path(configured_home or Path.home() / ".pload").expanduser().resolve()
+
+        configured_venvs = venvs_dir or os.environ.get("PLOAD_VENVS_DIR")
+        configured_state = state_dir or os.environ.get("PLOAD_STATE_DIR")
+        self.venv_path = Path(configured_venvs or self.home / "venvs").expanduser().resolve()
+        self.state_path = Path(configured_state or self.home / "state").expanduser().resolve()
         self.platform = sys.platform
 
-        # 平台相关配置
-        self._init_platform_paths()
+        configured_pyenv = os.environ.get("PYENV_ROOT") or os.environ.get("PYENV_HOME")
+        self.pyenv_path = Path(configured_pyenv or Path.home() / ".pyenv").expanduser()
+        self.pyenv_exe = shutil.which("pyenv")
+        self.pyenv_versions = self.pyenv_path / "versions"
 
-        # 命名校验规则
-        self._init_name_rules()
-
-    def _init_platform_paths(self):
-        if self.platform == 'win32':
-            # Windows 配置
-            self.pyenv_path = os.environ.get('PYENV_HOME')
-            self.pyenv_exe = os.path.join(self.pyenv_path, 'bin', 'pyenv.bat')
-            self.pyenv_versions = os.path.join(self.pyenv_path, 'versions')
-        elif self.platform == 'darwin':
-            # macOS 配置: /opt/homebrew/bin/pyenv
-            home = os.path.expanduser("~")
-            self.pyenv_path = os.path.join(home, '.pyenv')
-            # self.pyenv_exe = os.path.join(self.pyenv_path, 'bin', 'pyenv')
-            self.pyenv_exe = '/opt/homebrew/bin/pyenv'
-            self.pyenv_versions = os.path.join(self.pyenv_path, 'versions')
-        else:
-            # Linux/Mac 配置
-            home = os.path.expanduser("~")
-            self.pyenv_path = os.path.join(home, '.pyenv')
-            self.pyenv_exe = os.path.join(self.pyenv_path, 'bin', 'pyenv')
-            self.pyenv_versions = os.path.join(self.pyenv_path, 'versions')
-
-    def _init_name_rules(self):
-        self.name_patterns = {
-            'win32': {
-                'regex': r"^(?!CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])[a-zA-Z0-9_-]+$",
-                'error_msg': "不符合 Windows 命名规则（禁止使用保留名称，允许字母/数字/下划线/连字符）"
-            },
-            'linux': {
-                'regex': r"^[a-zA-Z0-9_-]+$",
-                'error_msg': "不符合 Linux 命名规则（允许字母/数字/下划线/连字符）"
-            },
-            'darwin': {
-                'regex': r"^[a-zA-Z0-9_-]+$",
-                'error_msg': "不符合 MacOS 命名规则（允许字母/数字/下划线/连字符）"
-            }
-        }
-
-    def validate_env_name(self, name):
-        """
-        校验环境名称合法性
-        :param name: 待校验的名称
-        :return: (is_valid, error_message)
-        """
-        rule = self.name_patterns[self.platform]
-        if not re.match(rule['regex'], name):
-            return False, f"{name} {rule['error_msg']}"
+    @staticmethod
+    def validate_env_name(name):
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", name or ""):
+            return False, "use letters, numbers, dots, underscores, or hyphens"
+        if sys.platform == "win32" and re.fullmatch(
+            r"(?i)(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?", name
+        ):
+            return False, "this name is reserved by Windows"
         return True, None
 
-    def get_python_path(self, version):
-        """获取 Python 解释器路径"""
+    @staticmethod
+    def _python_in(prefix):
+        prefix = Path(prefix)
+        if sys.platform == "win32":
+            return prefix / "python.exe"
+        return prefix / "bin" / "python"
 
-        if self.platform == 'win32':
-            python_exe = os.path.join(self.pyenv_versions, version, 'python.exe')
-        else:
-            python_exe = os.path.join(self.pyenv_versions, version, 'bin', 'python')
+    def get_python_path(self, version=None):
+        if not version or version in {"current", "system"}:
+            return Path(sys.executable).resolve()
 
-        if os.path.exists(python_exe):
-            return python_exe
-        else:
-            user_input = input(f'[?] Python {version} not found. Do you want to install it? (y/n): ')
-            if user_input.lower() == 'y':
-                subprocess.run([self.pyenv_exe, 'install', version])
+        candidate = Path(version).expanduser()
+        if candidate.is_file():
+            return candidate.resolve()
 
-                # show output of the installation
-                for line in iter(subprocess.check_output([self.pyenv_exe, 'versions']).decode('utf-8').splitlines()):
-                    print(line)
+        direct = self._python_in(self.pyenv_versions / version)
+        if direct.is_file():
+            return direct.resolve()
 
-                return self.get_python_path(version)
-            else:
-                print('[!] Operation canceled.')
-                exit(1)
+        if self.pyenv_exe:
+            env = os.environ.copy()
+            env["PYENV_VERSION"] = version
+            result = subprocess.run(
+                [self.pyenv_exe, "which", "python"],
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+            resolved = Path(result.stdout.strip())
+            if result.returncode == 0 and resolved.is_file():
+                return resolved.resolve()
 
-    def get_pip_path(self, venv_path):
-        """获取虚拟环境中的 pip 路径"""
-        if self.platform == 'win32':
-            return os.path.join(venv_path, 'Scripts', 'pip.exe')
-        else:
-            return os.path.join(venv_path, 'bin', 'pip')
+        for command in (f"python{version}", f"python{version.split('.')[0]}"):
+            found = shutil.which(command)
+            if found:
+                return Path(found).resolve()
 
-    def resolve_venv_path(self, version, message, is_local):
-        """
-        生成虚拟环境路径
-        :return: (full_path, display_name)
-        """
+        raise PythonNotFoundError(
+            f"Python {version!r} was not found. Install it with pyenv, pass an "
+            "interpreter path, or omit --version to use the current Python."
+        )
+
+    @staticmethod
+    def venv_python(venv_path):
+        path = Path(venv_path)
+        if sys.platform == "win32":
+            return path / "Scripts" / "python.exe"
+        return path / "bin" / "python"
+
+    @classmethod
+    def get_pip_command(cls, venv_path):
+        return [str(cls.venv_python(venv_path)), "-m", "pip"]
+
+    @staticmethod
+    def activate_path(venv_path, shell=None):
+        path = Path(venv_path)
+        shell = shell or ("powershell" if sys.platform == "win32" else "posix")
+        if shell == "powershell":
+            return path / "Scripts" / "Activate.ps1"
+        if shell == "fish":
+            return path / "bin" / "activate.fish"
+        return path / "bin" / "activate"
+
+    def resolve_venv_path(
+        self,
+        version=None,
+        message="normal",
+        is_local=False,
+        project_dir=None,
+        target=None,
+        name=None,
+    ):
+        project = Path(project_dir or Path.cwd()).expanduser().resolve()
+        if target:
+            target_path = Path(target).expanduser()
+            if not target_path.is_absolute():
+                target_path = project / target_path
+            target_path = target_path.resolve()
+            return target_path, target_path.name
+
         if is_local:
-            return (
-                os.path.join(os.getcwd(), '.venv'),
-                ".venv"
-            )
-        else:
-            clean_name = message.replace(' ', '_')
-            is_valid, error = self.validate_env_name(clean_name)
-            if not is_valid:
-                print(f"[!] not a valid venv name: {clean_name}")
-                exit(1)
+            return project / ".venv", ".venv"
 
-            env_name = f"{version}-{clean_name}"
-            return (
-                os.path.join(self.venv_path, env_name),
-                env_name
-            )
+        env_name = name or f"{version or 'current'}-{message.replace(' ', '_')}"
+        valid, error = self.validate_env_name(env_name)
+        if not valid:
+            raise ValueError(f"invalid environment name {env_name!r}: {error}")
+        return self.venv_path / env_name, env_name
+
+    def ensure_directories(self):
+        self.venv_path.mkdir(parents=True, exist_ok=True)
+        self.state_path.mkdir(parents=True, exist_ok=True)
 
     def wrvenv(self, key, value):
-        """写入环境配置"""
-        file_path = os.path.join(self.venv_path, 'env_value')
-        existing_content = {}
-        if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
-            with open(file_path, 'r') as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith('#'):
-                        k, v = line.split('=', 1)
-                        existing_content[k] = v
-        existing_content[key] = value
-        with open(file_path, 'w') as f:
-            for k, v in existing_content.items():
-                f.write(f"{k}={v}\n")
+        self.ensure_directories()
+        file_path = self.state_path / "env_value"
+        values = {}
+        if file_path.is_file():
+            for line in file_path.read_text(encoding="utf-8").splitlines():
+                if line and not line.startswith("#") and "=" in line:
+                    current_key, current_value = line.split("=", 1)
+                    values[current_key] = current_value
+        values[key] = str(value)
+        file_path.write_text(
+            "".join(f"{item_key}={item_value}\n" for item_key, item_value in values.items()),
+            encoding="utf-8",
+        )
 
     def rdvenv(self, key):
-        """读取环境配置"""
-        file_path = os.path.join(self.venv_path, 'env_value')
-        if not os.path.exists(file_path):
+        file_path = self.state_path / "env_value"
+        if not file_path.is_file():
             return None
-        with open(file_path, 'r') as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith('#'):
-                    k, v = line.split('=', 1)
-                    if k == key:
-                        return v
+        for line in file_path.read_text(encoding="utf-8").splitlines():
+            if line and not line.startswith("#") and "=" in line:
+                current_key, value = line.split("=", 1)
+                if current_key == key:
+                    return value
         return None

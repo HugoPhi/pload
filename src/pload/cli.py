@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from pload import __version__
+from pload.display import print_environment_table, print_python_table
 from pload.errors import PloadError
 from pload.managers.dependency import DependencyManager
 from pload.managers.platform import ConfigManager, PythonNotFoundError
@@ -22,8 +23,9 @@ def build_parser():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Typical workflow:
   pload python install 3.12        Download a managed Python when needed
-  pload new --name data -v 3.12   Create a managed environment
-  pload data                       Activate it (after shell initialization)
+  pload new --name data -v 3.12 -d "Data analysis"
+                                   Create a described environment with an ID
+  pload v1                         Activate it by ID (after shell initialization)
   pload init                       Create .venv for the current project
   pload .                          Activate the project environment
 
@@ -49,13 +51,14 @@ Run `pload <command> -h` for command-specific examples.""",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
   pload new --name tools
-  pload new --name data --version 3.12 -r numpy pandas
+  pload new --name data --version 3.12 -d "Data analysis" -r numpy pandas
   pload new --path /mnt/venvs/build --version /opt/python/bin/python""",
     )
     new.add_argument("--version", "-v", dest="python_version")
     new.add_argument("--message", "-m", default="normal")
     new.add_argument("--name", help="exact environment name")
     new.add_argument("--path", help="exact destination instead of the managed root")
+    new.add_argument("--description", "-d", help="human-readable purpose shown by pload list")
     add_packages(new)
 
     init = subparsers.add_parser(
@@ -67,7 +70,7 @@ Run `pload <command> -h` for command-specific examples.""",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
   pload init
-  pload init --project-dir ./service --venv-dir .runtime/python
+  pload init --project-dir ./service --venv-dir .runtime/python -d "Service tools"
   pload init --project-dir /srv/app --venv-dir /mnt/venvs/app -v 3.12""",
     )
     init.add_argument("--version", "-v", dest="python_version")
@@ -76,16 +79,18 @@ Run `pload <command> -h` for command-specific examples.""",
         "--venv-dir", default=".venv",
         help="environment path, relative to --project-dir or absolute",
     )
+    init.add_argument("--description", "-d", help="human-readable purpose shown by pload list")
     add_packages(init)
 
     remove = subparsers.add_parser(
         "rm", aliases=["remove"], help="remove environments",
         description=(
-            "Remove named environments or select managed environments with a regular "
+            "Remove environments by stable ID or name, or select managed environments with a regular "
             "expression. Active environments and symbolic links are never removed."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
+  pload rm v1
   pload rm data
   pload rm data test --yes
   pload rm --expression '^temporary-' --yes
@@ -99,17 +104,23 @@ Run `pload <command> -h` for command-specific examples.""",
 
     listing = subparsers.add_parser(
         "list", help="list managed environments",
-        description="List valid environments under the configured managed root.",
+        description=(
+            "List registered environments in a readable table. Legacy environments under "
+            "the managed root are assigned stable IDs automatically."
+        ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
   pload list
+  pload list --expression '^(v1|data)$'
   pload list --expression '^3\\.12-'
   pload list --python-versions""",
     )
     listing.add_argument("--expression", "-e", "-re", default=".*")
     listing.add_argument("--python-versions", "--version", "-v", action="store_true")
 
-    path = subparsers.add_parser("path", help="print an environment or activation path")
+    path = subparsers.add_parser(
+        "path", help="print an environment or activation path by ID, name, or path"
+    )
     path.add_argument("name")
     path.add_argument("--project-dir", default=".")
     path.add_argument("--shell", choices=["bash", "zsh", "fish", "powershell"])
@@ -237,6 +248,7 @@ def run(argv=None):
             message=args.message,
             target=args.path,
             name=args.name,
+            description=args.description,
         )
         dependencies.install_dependencies(path, args.requirements, args.channel)
         return 0
@@ -249,6 +261,7 @@ def run(argv=None):
             is_local=True,
             project_dir=project,
             target=args.venv_dir,
+            description=args.description,
         )
         dependencies.install_dependencies(path, args.requirements, args.channel)
         return 0
@@ -276,9 +289,12 @@ def run(argv=None):
                 if pattern.fullmatch(version):
                     print(version)
         else:
-            for name in venvs.get_existing_venvs():
-                if pattern.fullmatch(name):
-                    print(name)
+            environments = [
+                item for item in venvs.environments()
+                if pattern.fullmatch(item.get("name", ""))
+                or pattern.fullmatch(item.get("id", ""))
+            ]
+            print_environment_table(environments)
         return 0
 
     if args.command == "path":
@@ -299,8 +315,7 @@ def run(argv=None):
         if args.python_command == "install":
             manager.install_python(args.version)
         elif args.python_command == "list":
-            for version in manager.get_installed_versions(args.sources):
-                print(version)
+            print_python_table(manager.discover(args.sources))
         elif args.python_command == "path":
             print(config.get_python_path(args.version))
         return 0

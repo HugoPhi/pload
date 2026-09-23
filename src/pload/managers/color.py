@@ -29,3 +29,14 @@ class Colors:
     @classmethod
     def cyan(cls, value):
         return cls._paint(value, "36")
+
+    @classmethod
+    def blue(cls, value):
+        return cls._paint(value, "34")
+
+    @classmethod
+    def bold(cls, value):
+        text = str(value)
+        if not cls.enabled:
+            return text
+        return f"\033[1m{text}\033[0m"

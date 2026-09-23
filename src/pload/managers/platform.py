@@ -117,13 +117,25 @@ class ConfigManager:
         root = Path(self.python["install_dir"]).expanduser()
         if not root.is_dir():
             return []
-        names = {"python.exe"} if sys.platform == "win32" else {"python", "python3"}
         candidates = []
         for path in root.rglob("python*"):
-            is_python_name = path.name in names or path.name.startswith("python3.")
-            if path.is_file() and is_python_name and os.access(path, os.X_OK):
+            if (
+                path.is_file()
+                and self._is_python_executable_name(path.name)
+                and os.access(path, os.X_OK)
+            ):
                 candidates.append(path)
         return sorted(set(candidates))
+
+    @staticmethod
+    def _is_python_executable_name(name, platform=None):
+        platform = platform or sys.platform
+        normalized = name.lower()
+        if platform == "win32":
+            return bool(
+                re.fullmatch(r"python(?:3(?:\.\d+)?)?\.exe", normalized)
+            )
+        return bool(re.fullmatch(r"python(?:3(?:\.\d+)?)?", name))
 
     def find_managed_python(self, version):
         requested = str(version)
@@ -131,9 +143,15 @@ class ConfigManager:
             if requested.startswith(prefix):
                 requested = requested[len(prefix):]
         for candidate in self.managed_python_candidates():
-            result = subprocess.run(
-                [str(candidate), "--version"], capture_output=True, text=True, check=False
-            )
+            try:
+                result = subprocess.run(
+                    [str(candidate), "--version"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+            except OSError:
+                continue
             output = (result.stdout or result.stderr).strip()
             if result.returncode == 0 and output.startswith(f"Python {requested}"):
                 return candidate.resolve()

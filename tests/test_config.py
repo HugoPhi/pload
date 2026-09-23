@@ -80,3 +80,23 @@ def test_saved_configuration_controls_all_managed_roots(tmp_path):
     assert config.state_path == (tmp_path / "state").resolve()
     assert config.python["install_dir"] == str(tmp_path / "python")
     assert config.python["mirror"] == "https://mirror.example/releases/download"
+
+
+def test_managed_python_names_exclude_windows_libraries():
+    matches = ConfigManager._is_python_executable_name
+
+    assert matches("python.exe", "win32")
+    assert matches("python3.exe", "win32")
+    assert matches("python3.12.exe", "win32")
+    assert not matches("python3.dll", "win32")
+    assert not matches("python312.dll", "win32")
+    assert not matches("pythonw.exe", "win32")
+
+
+def test_managed_python_names_match_versioned_unix_executables():
+    matches = ConfigManager._is_python_executable_name
+
+    assert matches("python", "linux")
+    assert matches("python3", "darwin")
+    assert matches("python3.12", "linux")
+    assert not matches("python3.pc", "linux")

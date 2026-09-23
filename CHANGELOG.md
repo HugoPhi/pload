@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.1 - 2026-09-23
+
+### Fixed
+
+- Automatically reuse a populated legacy `~/venvs` root when no explicit path
+  is configured, so upgrading from 0.3 does not hide existing environments.
+
 ## 0.4.0 - 2026-09-23
 
 ### Added

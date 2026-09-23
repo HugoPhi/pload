@@ -70,6 +70,11 @@ The resulting layout is:
 Override roots independently with `PLOAD_VENVS_DIR` and `PLOAD_STATE_DIR`, or
 use the global `--home`, `--venvs-dir`, and `--state-dir` options.
 
+Existing 0.3 installations are detected automatically: if `~/venvs` contains
+the old scripts, state file, or virtual environments and no new path is
+configured, pload continues using it. Set `PLOAD_HOME` when you are ready to
+move to the isolated layout.
+
 Projects and virtual environments can be placed independently:
 
 ```console

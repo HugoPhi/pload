@@ -40,3 +40,23 @@ def test_current_python_does_not_require_pyenv(tmp_path):
     config = ConfigManager(home=tmp_path / "home")
     assert config.get_python_path() == Path(os.sys.executable).resolve()
 
+
+def test_legacy_root_is_reused_for_existing_users(monkeypatch, tmp_path):
+    monkeypatch.delenv("PLOAD_HOME", raising=False)
+    monkeypatch.delenv("PLOAD_VENVS_DIR", raising=False)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    legacy = tmp_path / "venvs"
+    (legacy / "scripts").mkdir(parents=True)
+
+    config = ConfigManager()
+
+    assert config.venv_path == legacy.resolve()
+
+
+def test_explicit_home_never_falls_back_to_legacy(monkeypatch, tmp_path):
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    (tmp_path / "venvs" / "scripts").mkdir(parents=True)
+
+    config = ConfigManager(home=tmp_path / "portable")
+
+    assert config.venv_path == (tmp_path / "portable" / "venvs").resolve()

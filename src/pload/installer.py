@@ -14,6 +14,9 @@ from pload.settings import (
     save_settings,
 )
 
+PYPI_OFFICIAL_INDEX = "https://pypi.org/simple"
+PYPI_TSINGHUA_INDEX = "https://pypi.tuna.tsinghua.edu.cn/simple"
+
 
 def build_parser():
     parser = argparse.ArgumentParser(
@@ -147,9 +150,9 @@ def collect_settings(args):
     if pip_index:
         pass
     elif pip_source == "official":
-        pip_index = None
+        pip_index = PYPI_OFFICIAL_INDEX
     elif pip_source == "tsinghua":
-        pip_index = "https://pypi.tuna.tsinghua.edu.cn/simple"
+        pip_index = PYPI_TSINGHUA_INDEX
     elif pip_source == "custom":
         pip_index = existing.get("pip_index")
     if pip_source == "custom" and not pip_index:
@@ -215,7 +218,10 @@ def install_private_runtime(settings):
     if settings.get("pip_index"):
         command += ["--index-url", settings["pip_index"]]
     command += [settings["package_spec"], "uv"]
-    result = subprocess.run(command, check=False)
+    env = os.environ.copy()
+    for variable in ("PIP_INDEX_URL", "PIP_EXTRA_INDEX_URL", "PIP_NO_INDEX"):
+        env.pop(variable, None)
+    result = subprocess.run(command, check=False, env=env)
     if result.returncode != 0:
         raise PloadError("failed to install pload and uv into the private runtime")
     return python

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.2 - 2026-09-24
+
+### Fixed
+
+- Make the selected package index override ambient pip index, extra-index, and
+  no-index environment variables during private-runtime installation.
+- Store the official PyPI URL explicitly when the official source is selected.
+
 ## 0.6.1 - 2026-09-24
 
 ### Fixed

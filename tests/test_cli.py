@@ -1,4 +1,4 @@
-from pload.cli import main, shell_script
+from pload.cli import build_parser, main, shell_script
 
 
 def test_init_can_place_project_and_environment_independently(tmp_path):
@@ -38,7 +38,7 @@ def test_shell_init_supports_all_documented_shells():
     for shell in ("bash", "zsh", "fish", "powershell"):
         output = shell_script(shell)
         assert "function" in output or "pload()" in output
-        assert "python_virtual_env_load" in output
+        assert "pload" in output
 
 
 def test_remove_refuses_environment_symlink(tmp_path, capsys):
@@ -56,3 +56,13 @@ def test_remove_refuses_environment_symlink(tmp_path, capsys):
     assert result == 1
     assert target.is_dir()
     assert "symlink" in capsys.readouterr().err
+
+
+def test_help_describes_python_and_isolation_workflows(capsys):
+    parser = build_parser()
+    parser.print_help()
+    output = capsys.readouterr().out
+
+    assert "pload python install 3.12" in output
+    assert "PLOAD_HOME" in output
+    assert "--project-dir" in output

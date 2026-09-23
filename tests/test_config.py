@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 
 from pload.managers.platform import ConfigManager
+from pload.settings import save_settings
 
 
 def test_explicit_paths_are_fully_isolated(tmp_path):
@@ -60,3 +61,22 @@ def test_explicit_home_never_falls_back_to_legacy(monkeypatch, tmp_path):
     config = ConfigManager(home=tmp_path / "portable")
 
     assert config.venv_path == (tmp_path / "portable" / "venvs").resolve()
+
+
+def test_saved_configuration_controls_all_managed_roots(tmp_path):
+    home = tmp_path / "pload"
+    save_settings(home, {
+        "venvs_dir": str(tmp_path / "envs"),
+        "state_dir": str(tmp_path / "state"),
+        "python": {
+            "install_dir": str(tmp_path / "python"),
+            "mirror": "https://mirror.example/releases/download",
+        },
+    })
+
+    config = ConfigManager(home=home)
+
+    assert config.venv_path == (tmp_path / "envs").resolve()
+    assert config.state_path == (tmp_path / "state").resolve()
+    assert config.python["install_dir"] == str(tmp_path / "python")
+    assert config.python["mirror"] == "https://mirror.example/releases/download"

@@ -13,6 +13,8 @@ release checklist passes. Each stable merge receives a matching annotated tag.
 
 ## 0.5.x: declarative projects
 
+- Provide a guided private-runtime installer and configurable managed-Python
+  downloads without requiring pyenv.
 - Introduce an optional `pload.toml` for interpreter, environment path, index,
   and dependency declarations.
 - Add non-interactive sync and diagnostics commands.
@@ -33,4 +35,3 @@ release checklist passes. Each stable merge receives a matching annotated tag.
 4. Update the changelog and remove the `Unreleased` marker.
 5. Merge the release branch to `main` without rewriting published history.
 6. Create an annotated `vX.Y.Z` tag and publish from that tag.
-

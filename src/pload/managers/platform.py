@@ -19,7 +19,15 @@ class ConfigManager:
 
         configured_venvs = venvs_dir or os.environ.get("PLOAD_VENVS_DIR")
         configured_state = state_dir or os.environ.get("PLOAD_STATE_DIR")
-        self.venv_path = Path(configured_venvs or self.home / "venvs").expanduser().resolve()
+        if configured_venvs:
+            resolved_venvs = Path(configured_venvs)
+        else:
+            resolved_venvs = self.home / "venvs"
+            legacy_venvs = Path.home() / "venvs"
+            may_use_legacy = configured_home is None and not resolved_venvs.exists()
+            if may_use_legacy and self._looks_like_legacy_root(legacy_venvs):
+                resolved_venvs = legacy_venvs
+        self.venv_path = resolved_venvs.expanduser().resolve()
         self.state_path = Path(configured_state or self.home / "state").expanduser().resolve()
         self.platform = sys.platform
 
@@ -27,6 +35,17 @@ class ConfigManager:
         self.pyenv_path = Path(configured_pyenv or Path.home() / ".pyenv").expanduser()
         self.pyenv_exe = shutil.which("pyenv")
         self.pyenv_versions = self.pyenv_path / "versions"
+
+    @staticmethod
+    def _looks_like_legacy_root(path):
+        if not path.is_dir():
+            return False
+        if (path / "scripts").is_dir() or (path / "env_value").is_file():
+            return True
+        return any(
+            child.is_dir() and (child / "pyvenv.cfg").is_file()
+            for child in path.iterdir()
+        )
 
     @staticmethod
     def validate_env_name(name):

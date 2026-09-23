@@ -66,3 +66,13 @@ def test_help_describes_python_and_isolation_workflows(capsys):
     assert "pload python install 3.12" in output
     assert "PLOAD_HOME" in output
     assert "--project-dir" in output
+
+
+def test_python_list_filter_accepts_comma_or_space_separated_types():
+    parser = build_parser()
+
+    comma = parser.parse_args(["python", "list", "--filter", "uv,conda"])
+    spaces = parser.parse_args(["python", "list", "--filter", "uv", "conda"])
+
+    assert comma.sources == ["uv,conda"]
+    assert spaces.sources == ["uv", "conda"]

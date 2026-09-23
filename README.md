@@ -94,9 +94,34 @@ to the configured pload directories.
 ```console
 pload python install 3.12
 pload python list
+pload python list --filter uv,conda
 pload python path 3.12
 pload new --name data --version 3.12
 ```
+
+`pload python list` discovers usable Python 3 interpreters from the operating
+system, PATH, uv, pyenv, Conda, mise, asdf, Homebrew, and the Windows Python
+Launcher. Results are deduplicated by resolved executable path:
+
+```text
+VERSION  TYPE      PATH
+-------  --------  ----
+3.9.6    sys       /usr/bin/python3
+3.11.10  conda     /opt/miniconda3/envs/data/bin/python
+3.12.8   uv        /data/pload/pythons/cpython-3.12.8/bin/python3.12
+3.13.3   homebrew  /opt/homebrew/Cellar/python@3.13/.../python3.13
+```
+
+Filter one or more source types with commas or spaces:
+
+```console
+pload python list --filter uv,conda
+pload python list --filter uv conda
+```
+
+Available types are `sys`, `pyenv`, `uv`, `conda`, `mise`, `asdf`,
+`homebrew`, and `other`. The compatibility aliases `system` and `managed`
+map to `sys` and `uv` respectively.
 
 Python itself does not publish one portable binary distribution covering all
 supported platforms. uv therefore uses the CPython builds from Astral's
@@ -137,7 +162,7 @@ does not disable uv's normal archive metadata and integrity handling.
 
 ```console
 pload new --name data                 # private-runtime Python
-pload new --name web --version 3.12   # managed, PATH, or pyenv Python
+pload new --name web --version 3.12   # any discovered Python 3.12
 pload data                            # activate
 
 pload init                            # create .venv here

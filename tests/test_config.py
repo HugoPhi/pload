@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from subprocess import CompletedProcess
 
 from pload.managers.platform import ConfigManager
 from pload.settings import save_settings
@@ -100,3 +101,18 @@ def test_managed_python_names_match_versioned_unix_executables():
     assert matches("python3", "darwin")
     assert matches("python3.12", "linux")
     assert not matches("python3.pc", "linux")
+
+
+def test_managed_minor_request_selects_newest_patch(monkeypatch, tmp_path):
+    config = ConfigManager(home=tmp_path / "home")
+    older = tmp_path / "python-3.8.15"
+    newer = tmp_path / "python-3.8.20"
+    monkeypatch.setattr(config, "managed_python_candidates", lambda: [older, newer])
+
+    def version_result(command, **kwargs):
+        version = "3.8.15" if Path(command[0]) == older else "3.8.20"
+        return CompletedProcess(command, 0, stdout=f"Python {version}\n", stderr="")
+
+    monkeypatch.setattr("pload.managers.platform.subprocess.run", version_result)
+
+    assert config.find_managed_python("3.8") == newer.resolve()

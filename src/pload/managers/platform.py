@@ -102,15 +102,16 @@ class ConfigManager:
             if result.returncode == 0 and resolved.is_file():
                 return resolved.resolve()
 
-        for command in (f"python{version}", f"python{version.split('.')[0]}"):
-            found = shutil.which(command)
-            if found:
-                return Path(found).resolve()
+        from pload.managers.pyversion import PythonManager
+
+        discovered = PythonManager(self).find_python(version)
+        if discovered:
+            return discovered.resolve()
 
         raise PythonNotFoundError(
-            f"Python {version!r} was not found. Install it with pyenv, pass an "
-            f"interpreter path, run 'pload python install {version}', or omit "
-            "--version to use the current Python."
+            f"Python {version!r} was not found. Pass an interpreter path, run "
+            f"'pload python install {version}', or use 'pload python list' to "
+            "inspect every discovered interpreter."
         )
 
     def managed_python_candidates(self):
@@ -142,6 +143,7 @@ class ConfigManager:
         for prefix in ("cpython@", "cpython-"):
             if requested.startswith(prefix):
                 requested = requested[len(prefix):]
+        matches = []
         for candidate in self.managed_python_candidates():
             try:
                 result = subprocess.run(
@@ -153,9 +155,12 @@ class ConfigManager:
             except OSError:
                 continue
             output = (result.stdout or result.stderr).strip()
-            if result.returncode == 0 and output.startswith(f"Python {requested}"):
-                return candidate.resolve()
-        return None
+            if result.returncode == 0 and output.startswith("Python "):
+                installed = output.split(None, 1)[1]
+                if installed == requested or installed.startswith(requested + "."):
+                    version_key = tuple(int(item) for item in re.findall(r"\d+", installed))
+                    matches.append((version_key, candidate.resolve()))
+        return max(matches, default=(None, None))[1]
 
     def uv_executable(self):
         executable = "uv.exe" if sys.platform == "win32" else "uv"

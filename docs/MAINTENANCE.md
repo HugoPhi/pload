@@ -20,6 +20,13 @@ release checklist passes. Each stable merge receives a matching annotated tag.
 - Add non-interactive sync and diagnostics commands.
 - Define migration behavior for legacy `~/venvs` installations.
 
+## 0.6.x: interpreter discovery
+
+- Discover and classify Python installations from the operating system, PATH,
+  uv, pyenv, Conda, mise, asdf, Homebrew, and Windows Python Launcher.
+- Resolve version requests only after probing the real interpreter version.
+- Keep discovery filterable and deterministic across platforms.
+
 ## 1.0.x: stable interface
 
 - Freeze CLI and configuration compatibility guarantees.

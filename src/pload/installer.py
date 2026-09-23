@@ -244,6 +244,21 @@ def write_launcher(settings, python):
     return launcher
 
 
+def installed_pload_version(python):
+    """Read the version from the private runtime after installation completes."""
+    try:
+        result = subprocess.run(
+            [str(python), "-c", "import pload; print(pload.__version__)"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return __version__
+    version = result.stdout.strip()
+    return version if result.returncode == 0 and version else __version__
+
+
 def profile_path(shell):
     if shell == "bash":
         return Path.home() / ".bashrc"
@@ -297,7 +312,8 @@ def run(argv=None):
     python = install_private_runtime(settings)
     launcher = write_launcher(settings, python)
     profile = configure_shell(settings)
-    print(f"[*] Installed pload {__version__}: {launcher}")
+    installed_version = installed_pload_version(python)
+    print(f"[*] Installed pload {installed_version}: {launcher}")
     print(f"[*] Configuration: {path}")
     if profile:
         print(f"[*] Updated shell profile: {profile}")

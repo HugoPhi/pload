@@ -1,9 +1,16 @@
 import json
 import os
 from argparse import Namespace
+from subprocess import CompletedProcess
 
 from pload import installer
-from pload.installer import collect_settings, configure_shell, run, write_launcher
+from pload.installer import (
+    collect_settings,
+    configure_shell,
+    installed_pload_version,
+    run,
+    write_launcher,
+)
 from pload.settings import USTC_PYTHON_MIRROR
 
 
@@ -69,6 +76,17 @@ def test_launcher_uses_private_runtime_and_fixed_home(tmp_path):
     assert "pload.cli" in content
     if os.name != "nt":
         assert os.access(launcher, os.X_OK)
+
+
+def test_installed_version_is_read_from_private_runtime(monkeypatch, tmp_path):
+    python = tmp_path / "runtime" / "python"
+
+    def completed(command, **kwargs):
+        return CompletedProcess(command, 0, stdout="0.6.1\n", stderr="")
+
+    monkeypatch.setattr(installer.subprocess, "run", completed)
+
+    assert installed_pload_version(python) == "0.6.1"
 
 
 def test_shell_configuration_updates_existing_managed_block(monkeypatch, tmp_path):

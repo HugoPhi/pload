@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.6.0 - 2026-09-23
+
+### Added
+
+- Cross-platform Python discovery across the operating system, PATH, uv,
+  pyenv, Conda, mise, asdf, Homebrew, and the Windows Python Launcher.
+- Source and resolved executable columns in `pload python list`.
+- `pload python list --filter TYPE...` with comma-separated, space-separated,
+  and compatibility alias support.
+
+### Changed
+
+- Version-based environment creation can use any discovered interpreter, not
+  only uv, pyenv, or a versioned command already on PATH.
+- Requested minor versions are verified instead of falling back to an
+  unrelated `python3` executable.
+
 ## 0.5.0 - 2026-09-23
 
 ### Added

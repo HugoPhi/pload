@@ -130,7 +130,12 @@ Run `pload <command> -h` for command-specific examples.""",
   pload python install 3.12
   pload python install 3.12.8
   pload python list
+  pload python list --filter uv,conda
   pload python path 3.12
+
+The list command discovers interpreters from the operating system, PATH, uv,
+pyenv, Conda, mise, asdf, Homebrew, and the Windows Python Launcher. Duplicate
+paths are collapsed after resolving symbolic links.
 
 Run `pload config show` to inspect the download source and install directory.""",
     )
@@ -139,7 +144,30 @@ Run `pload config show` to inspect the download source and install directory."""
         "install", help="download a Python runtime with the configured source"
     )
     python_install.add_argument("version", help="version request, for example 3.12 or 3.12.8")
-    python_commands.add_parser("list", help="list managed and compatible pyenv runtimes")
+    python_list = python_commands.add_parser(
+        "list",
+        help="discover all usable Python interpreters",
+        description=(
+            "Discover usable Python 3 interpreters and show their version, source type, "
+            "and resolved executable path."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Examples:
+  pload python list
+  pload python list --filter uv,conda
+  pload python list --filter uv conda
+
+Types: sys, pyenv, uv, conda, mise, asdf, homebrew, other
+Aliases: system=sys, managed=uv""",
+    )
+    python_list.add_argument(
+        "--filter",
+        "-f",
+        dest="sources",
+        nargs="+",
+        metavar="TYPE",
+        help="source types, separated by commas or spaces",
+    )
     python_path = python_commands.add_parser("path", help="resolve an installed interpreter")
     python_path.add_argument("version")
 
@@ -271,7 +299,7 @@ def run(argv=None):
         if args.python_command == "install":
             manager.install_python(args.version)
         elif args.python_command == "list":
-            for version in manager.get_installed_versions():
+            for version in manager.get_installed_versions(args.sources):
                 print(version)
         elif args.python_command == "path":
             print(config.get_python_path(args.version))

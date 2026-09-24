@@ -28,6 +28,9 @@ COMMAND_ALIASES = {
     "shell-init": ("shell",),
     "python": ("py",),
     "config": ("cfg",),
+    "export": (),
+    "restore": (),
+    "repo": (),
 }
 PYTHON_ALIASES = {
     "install": (),
@@ -276,6 +279,43 @@ Aliases: system=sys, managed=uv""",
     )
     config.add_argument("key", nargs="?", help="setting name for `config set`")
     config.add_argument("value", nargs="?", help="new value for `config set`")
+    export = subparsers.add_parser(
+        "export", description="Save exact package pins and optional platform-specific wheels.",
+        help="snapshot an existing environment",
+    )
+    export.add_argument("name", help="new immutable snapshot name")
+    source = export.add_mutually_exclusive_group()
+    source.add_argument("--environment", "-e", help="environment ID, name or path (default: .venv)")
+    source.add_argument("--python", "-p", help="external interpreter, including uv/Conda/Poetry")
+    export.add_argument("--bundle", "-b", help="all or comma-separated packages to archive as wheels")
+    export.add_argument("--index-url", "-i", help="index used to download wheels, e.g. PyTorch CUDA")
+    export.add_argument("--find-links", "-f", action="append", help="existing wheel directory; repeatable")
+    restore = subparsers.add_parser(
+        "restore", description="Create a new environment from a snapshot or trusted requirements file.",
+        help="restore a snapshot or requirements.txt",
+    )
+    restore.add_argument("source", help="snapshot name/directory or requirements.txt path")
+    restore.add_argument("--name", "-n", required=True, help="name of the new environment")
+    restore.add_argument("--version", "-v", help="Python ID, version or interpreter path")
+    restore.add_argument("--offline", "-o", action="store_true", help="install only from local wheels")
+    restore.add_argument("--portable", "-p", action="store_true",
+                         help="resolve pins for another platform; ignore bundled wheels")
+    restore.add_argument("--index-url", "-i", help="package index for online restoration")
+    repo = subparsers.add_parser("repo", help="manage snapshot repositories",
+                                 description="Manage local, SSH and Git snapshot repositories.")
+    actions = repo.add_subparsers(dest="repo_command", required=True)
+    add = actions.add_parser("add", description="Save a repository location; no credentials stored.")
+    add.add_argument("name", help="repository nickname")
+    add.add_argument("location", help="directory, HOST:/absolute/path, or Git URL")
+    add.add_argument("--type", "-t", choices=["local", "ssh", "git"], default="local",
+                     help="transport (default: local)")
+    actions.add_parser("list", description="Show configured repositories.")
+    remove = actions.add_parser("remove", description="Remove configuration, keeping all remote files.")
+    remove.add_argument("name", help="repository nickname")
+    for verb in ("push", "pull"):
+        action = actions.add_parser(verb, description=f"{verb.title()} a complete immutable snapshot.")
+        action.add_argument("repository", help="configured repository nickname")
+        action.add_argument("snapshot", help="snapshot name")
     return parser
 
 
@@ -463,10 +503,13 @@ def _brief_help(parser, command_path, root_parser=None):
             "path": "Print an environment path",
             "config": "Show effective configuration",
             "shell-init": "Print shell activation integration",
+            "export": "Save a package snapshot and optional wheels",
+            "restore": "Recreate a snapshot or requirements file",
+            "repo": "Manage local, SSH and Git repositories",
         }
-        for command in ("new", "init", "list", "rm", "python", "path", "config", "shell-init"):
+        for command, summary in summaries.items():
             aliases = COMMAND_ALIASES[command]
-            table.add_row(command, ", ".join(aliases) if aliases else "—", summaries[command])
+            table.add_row(command, ", ".join(aliases) if aliases else "—", summary)
         console.print(table)
         console.print("[bold cyan]Quick start[/]")
         console.print("  [green]pload new[/]  [dim]# guided creation[/]")
@@ -554,7 +597,7 @@ def shell_script(shell):
     if shell in {"bash", "zsh"}:
         return r'''pload() {
     case "${1:-}" in
-        ""|new|init|i|rm|remove|del|delete|list|ls|path|p|shell-init|shell|python|py|config|cfg|-*)
+        ""|new|init|i|rm|remove|del|delete|list|ls|path|p|shell-init|shell|python|py|config|cfg|export|restore|repo|-*)
             command pload "$@"
             ;;
         *)
@@ -567,7 +610,7 @@ def shell_script(shell):
     if shell == "fish":
         return r'''function pload
     switch "$argv[1]"
-        case '' new init i rm remove del delete list ls path p shell-init shell python py config cfg '-*'
+        case '' new init i rm remove del delete list ls path p shell-init shell python py config cfg export restore repo '-*'
             command pload $argv
         case '*'
             set -l name .
@@ -581,7 +624,7 @@ def shell_script(shell):
 end'''
     return r'''function pload {
     param([Parameter(ValueFromRemainingArguments = $true)][string[]]$PloadArgs)
-    $commands = @('new', 'init', 'i', 'rm', 'remove', 'del', 'delete', 'list', 'ls', 'path', 'p', 'shell-init', 'shell', 'python', 'py', 'config', 'cfg', '-h', '--help', '--version')
+    $commands = @('new', 'init', 'i', 'rm', 'remove', 'del', 'delete', 'list', 'ls', 'path', 'p', 'shell-init', 'shell', 'python', 'py', 'config', 'cfg', 'export', 'restore', 'repo', '-h', '--help', '--version')
     $backend = Get-Command -Name @('pload.exe', 'pload.cmd') -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $backend) { throw 'pload executable not found on PATH' }
     if ($PloadArgs.Count -eq 0) {
@@ -646,6 +689,29 @@ def run(argv=None):
     config = ConfigManager(args.home, args.venvs_dir, args.state_dir)
     venvs = VenvManager(config)
     dependencies = DependencyManager(config)
+
+    if command in {"export", "restore", "repo"}:
+        from pload.snapshots import RepositoryManager, SnapshotManager
+
+        snapshots = SnapshotManager(config)
+        if command == "export":
+            print(snapshots.export(args.name, args.environment, args.python, args.bundle,
+                                   args.index_url, args.find_links))
+        elif command == "restore":
+            print(snapshots.restore(args.source, args.name, args.version,
+                                    args.offline, args.portable, args.index_url))
+        else:
+            repositories = RepositoryManager(config)
+            if args.repo_command == "add":
+                repositories.add(args.name, args.location, args.type)
+            elif args.repo_command == "remove":
+                repositories.remove(args.name)
+            elif args.repo_command == "list":
+                print(json.dumps(repositories.repositories(), indent=2))
+            else:
+                repositories.transfer(args.repository, args.snapshot, args.repo_command == "push")
+                print(f"[*] {args.repo_command}: {args.snapshot} ({args.repository})")
+        return 0
 
     if command == "new":
         if not any((args.python_version, args.name, args.path, args.description, args.requirements, args.channel)):
@@ -759,7 +825,7 @@ def run(argv=None):
 def main(argv=None):
     try:
         return run(argv)
-    except (PloadError, PythonNotFoundError, re.error) as exc:
+    except (PloadError, PythonNotFoundError, re.error, OSError) as exc:
         print(f"pload: error: {exc}", file=sys.stderr)
         return 1
 

@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Export exact package snapshots from managed and external Python environments,
+  with optional selected/all wheel bundles and checksums.
+- Restore snapshots offline, explicitly re-resolve for another platform, or
+  import trusted requirements files into new environments.
+- Configure local, SSH and Git recipe repositories; push and pull immutable snapshots.
+- Reuse local wheel archives and pip caches, deduplicate SSH wheel storage by SHA-256,
+  and avoid re-downloading identical cached wheels during pull.
+- Document interoperability boundaries, GPU/native dependencies, source-wheel
+  provenance and repository trust requirements.
+
+### Fixed
+
+- Keep an external environment's interpreter path intact when probing packages,
+  instead of following its Python symlink out to the base installation.
+
 ## 1.0.0 - 2026-09-24
 
 ### Added

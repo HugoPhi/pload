@@ -13,6 +13,9 @@ class DependencyManager:
             return
 
         command = self.config.get_pip_command(venv_path) + ["install"] + list(requirements)
+        wheels = self.config.home / "cache" / "wheels"
+        if wheels.is_dir():
+            command += ["--find-links", str(wheels)]
         if channel:
             command += ["--index-url", channel]
 

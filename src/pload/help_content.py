@@ -331,6 +331,75 @@ selected shell profile. It does not reinstall pload or uv.
 }
 
 
+GUIDES[("export",)] = r"""
+# Save a reproducible package snapshot
+
+```console
+pload export analysis-01 -e v1
+pload export analysis-offline -p /path/to/project/.venv/bin/python -b all
+pload export training-01 -e v2 -b torch -f /mnt/downloaded-wheels
+```
+
+The first command records exact installed versions and interpreter/platform metadata
+under `PLOAD_HOME/snapshots/analysis-01`. Its requirements.txt also works with pip
+and uv. The second adds every package's wheel for offline restoration. The third
+archives only torch, so other packages still come from your package index.
+Use `-i URL` to select a dedicated wheel index, such as your PyTorch CUDA index.
+Existing shared wheels are tried offline first; then pip uses its normal caches.
+
+Names are immutable: export a new name for a new revision. Source checkouts and
+editable installs must first be built and installed as wheels. Direct-wheel installs
+need their original archive in `-f DIR` or the shared cache and inclusion in `-b`;
+the archive hash must match the installation metadata. Native Conda environments require Conda's own
+export tools. Python itself, OS libraries and GPU drivers are not bundled.
+"""
+GUIDES[("restore",)] = r"""
+# Restore into a new environment
+
+```console
+pload restore analysis-offline -n analysis-copy -o
+pload restore analysis-01 -n linux-copy -p
+pload restore ./requirements.txt -n imported -v 3.12
+```
+
+`-o` uses a complete wheel snapshot without a package index. SHA-256 checks run
+before creating the environment; wheel compatibility is checked by pip. The Python
+major/minor version must match and must already be installed.
+`-p` deliberately re-resolves the pinned versions for another platform. It is not
+a promise of an identical environment and cannot be combined with offline mode.
+Only import requirements files and repositories you trust: installing packages
+can execute code. Exported index provenance is informational; choose the restore
+index explicitly with `-i URL` when your configured index cannot supply a package.
+
+The target name must be unused. A failed install leaves that new environment for
+inspection or removal with `pload rm`. Existing environments are never updated.
+"""
+GUIDES[("repo",)] = r"""
+# Store recipes and reusable wheels on your own infrastructure
+
+```console
+pload repo add lab frpxiaoxin:/home/tibless/pload-cloud -t ssh
+pload repo push lab analysis-offline
+pload repo pull lab analysis-offline
+pload restore analysis-offline -n analysis-copy -o
+pload repo add recipes git@github.com:YOUR-NAME/pload-recipes.git -t git
+pload repo push recipes analysis-01
+pload repo list
+pload repo remove lab
+```
+
+Pull on another machine (or into a different PLOAD_HOME): existing snapshots are
+not overwritten. SSH uses your OpenSSH alias/keys and a Linux directory; no web
+server or extra Python package is required. Identical wheels are stored once by
+hash on the server and reused from the local cache on pull.
+Git repositories store recipes only; use SSH or a local directory for wheel bundles.
+Git authentication and commit identity come from your existing Git configuration.
+Removing a repository only forgets its configuration; remote data remains intact.
+"""
+for _command in ("add", "list", "remove", "push", "pull"):
+    GUIDES[("repo", _command)] = GUIDES[("repo",)]
+
+
 def render_detailed_help(parser, command_path):
     console = Console(highlight=False)
     content = GUIDES.get(tuple(command_path), GUIDES[()])

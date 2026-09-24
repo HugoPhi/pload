@@ -19,6 +19,7 @@ complete parameter reference and `-h -d` for practical examples and effects.
 - [Shell activation](#shell-activation)
 - [Discover and install Python](#discover-and-install-python)
 - [Create and activate environments](#create-and-activate-environments)
+- [Reproduce and share environments](#reproduce-and-share-environments)
 - [Help and aliases](#help-and-aliases)
 - [Isolation and directory layout](#isolation-and-directory-layout)
 - [Command reference](#command-reference)
@@ -73,6 +74,135 @@ python -m pload.installer --yes \
 
 `--yes` accepts explicit values and saved defaults. It only changes a shell
 profile when `--shell` is supplied or already configured.
+
+## Reproduce and share environments
+
+The next-version implementation on `feature/reproducible-environments` adds
+`export`, `restore` and `repo`. These commands are not in the published 1.0.0.
+Install this checkout into a separate development environment to try them:
+
+```console
+python3 -m venv .dev
+.dev/bin/python -m pip install -e .
+.dev/bin/pload export -h -d
+```
+
+On Windows, use `.dev\Scripts\python.exe` and `.dev\Scripts\pload.exe`.
+If using a shell function installed by 1.0.0, call the new executable directly
+or refresh shell integration so it recognizes the new commands.
+
+### Save a recipe or a wheel bundle
+
+```console
+pload export analysis-01 -e v1
+pload export analysis-offline -e v1 -b all
+pload export training-01 -e v2 -b torch -f /mnt/existing-wheels
+```
+
+Each snapshot is an immutable directory under `PLOAD_HOME/snapshots/NAME`.
+`requirements.txt` contains exact installed package versions, and `snapshot.json`
+records Python, platform, architecture, libc information and SHA-256 checksums.
+`-b all` adds all application package wheels; `-b torch,torchvision` archives only
+those packages. Other pinned packages are fetched from the configured index on restore.
+For a CUDA wheel index, add `-i https://download.pytorch.org/whl/cuXXX`, replacing
+`cuXXX` with the index appropriate for the installed torch build. The supplied
+index is recorded without credentials or query parameters; it is not automatically
+trusted or selected on restore. Use `restore -i URL` when needed.
+
+For environments created by venv, virtualenv, uv, Poetry or Pipenv, pass their
+Python executable directly (it must support Python 3.8+):
+
+```console
+pload export other-project -p /path/to/project/.venv/bin/python
+pload restore other-project -n project-copy
+pload restore ./requirements.txt -n imported -v 3.12
+python -m pip install -r ~/.pload/snapshots/analysis-01/requirements.txt
+```
+
+Requirements exported by another tool are the interchange format. Native uv,
+Poetry and Pipenv lockfiles are not parsed: export a requirements file with the
+original tool first. A snapshot describes what is installed; it is not a
+cross-platform solver lockfile. pip/setuptools/wheel bootstrap tooling is excluded.
+Archiving wheels requires pip inside the source environment; an existing uv can
+seed it, for example `uv pip install --python /path/to/.venv/bin/python pip`.
+
+Editable installs and source checkouts must first be built and installed as wheels.
+For direct-URL or local-wheel installs, supply the original wheel via `-f DIR`
+and include the package in `-b`; its SHA-256 must match the installation metadata.
+Environments restored from a bundle can be re-exported with `-b all`, reusing
+those exact wheels from the shared cache.
+Native Conda environments are also rejected: their native libraries/channels cannot
+be reproduced by pip. Keep a native Conda export, or explicitly export only pip
+requirements when a pip-only conversion is intended.
+
+### Restore and understand the limits
+
+```console
+pload restore analysis-offline -n analysis-copy -o
+pload restore analysis-01 -n another-platform -p
+```
+
+By default Python major/minor, implementation, OS and architecture must match.
+`-o` requires a complete `-b all` bundle and installs without an index; wheels are
+verified before use and pip checks their supported platform tags. The Python
+interpreter must already be installed. `-p` explicitly permits another platform
+and re-resolves the pins without the bundled wheels. This can fail when that
+version has no compatible build; it cannot be combined with `-o`.
+
+NumPy is platform-dependent too. Wheels cannot restore kernel drivers, the CUDA
+driver, system libraries, compiler flags, environment variables, data files or
+Conda native dependencies. OS/architecture checks are only a first guard, not a
+complete ABI or GPU compatibility guarantee. The first version does not mount
+remote site-packages at runtime: it fetches reusable artifacts and installs locally.
+Checksums detect corruption, not a malicious repository owner. Restore only trusted
+packages/requirements; installation can execute code. If installation fails, the
+new environment remains for inspection; existing environments are not modified.
+
+### Use your own host, a directory or GitHub
+
+```console
+pload repo add lab frpxiaoxin:/home/tibless/pload-cloud -t ssh
+pload repo push lab analysis-offline
+# On another machine, configure the same remote first:
+pload repo pull lab analysis-offline
+pload restore analysis-offline -n analysis-copy -o
+
+pload repo add disk /mnt/shared/pload -t local
+pload repo add recipes git@github.com:YOUR-NAME/pload-recipes.git -t git
+pload repo push recipes analysis-01
+pload repo list
+pload repo remove lab
+```
+
+SSH uses your existing alias/keys and `ssh`/`scp`, with a Linux filesystem on the
+server; no daemon, public HTTP endpoint or new Python dependency is needed. An
+SSH alias is preferable to a hardcoded FRP IP/port because SSH already manages
+the connection details. Git uses your installed Git and its authentication/identity.
+Create the GitHub repository yourself and point `repo add` at its URL. Git stores
+recipes only; push large wheel bundles to SSH or a local filesystem instead.
+Git pushes a new snapshot commit to the repository's default branch. Pull never
+installs packages automatically. Removing a remote removes only its configuration.
+
+Snapshot names cannot be overwritten locally or remotely: choose a new name for
+each revision. Failed SSH uploads can leave `.upload-*` staging directories, which
+are not visible as published snapshots. This initial version does not provide
+remote garbage collection, interrupted-download resumption or a remote catalogue.
+
+### Reuse downloads
+
+`PLOAD_HOME/cache/wheels` is shared by export, restore and package installation
+during `pload new`. Export/restore attempt an offline wheel lookup first, then use
+pip's normal resolver and cache. `export -f DIR` can reuse existing wheel files;
+it is repeatable. Pulled wheels are checksum-checked and added to the shared cache.
+Identical filenames with different bytes are rejected rather than silently replaced.
+SSH stores identical wheel content once under `objects/SHA256`, with hard links
+from snapshots. Pull skips network transfer for identical local cached wheels.
+
+pip's existing HTTP/wheel cache is left in its configured location and remains
+usable. Set `PIP_CACHE_DIR=/your/path` to relocate it; set `PLOAD_HOME` to relocate
+pload's snapshot and shared wheel directories. Unpacked uv caches or installed
+site-packages are not treated as wheel archives. A cache miss may still require
+one download even when the library is already installed somewhere.
 
 ## Upgrade
 

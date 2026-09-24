@@ -13,6 +13,7 @@ complete parameter reference and `-h -d` for practical examples and effects.
 ## Contents
 
 - [Install](#install)
+- [Upgrade](#upgrade)
 - [First run](#first-run)
 - [Configure later](#configure-later)
 - [Shell activation](#shell-activation)
@@ -72,6 +73,61 @@ python -m pload.installer --yes \
 
 `--yes` accepts explicit values and saved defaults. It only changes a shell
 profile when `--shell` is supplied or already configured.
+
+## Upgrade
+
+Check the installed version first:
+
+```console
+pload --version
+```
+
+For an installation managed by `pload-install`, upgrade the private runtime
+in place. Your configured directories, registry, downloaded Python runtimes,
+and virtual environments are kept:
+
+```console
+pload-install --yes --package-spec "pload==1.0.0"
+```
+
+To always follow the newest published release instead of pinning a version,
+omit the version constraint:
+
+```console
+pload-install --yes --package-spec pload
+```
+
+If your selected mirror has not synchronized the release yet, choose the
+official index for this run (or replace it with another configured index):
+
+```console
+pload-install --yes --package-spec "pload==1.0.0" --pip-index https://pypi.org/simple
+```
+
+For pipx installations use pipx's own upgrade command:
+
+```console
+pipx upgrade pload
+```
+
+For a dedicated bootstrap virtual environment, run pip through that same
+interpreter:
+
+```console
+~/.pload-bootstrap/bin/python -m pip install --upgrade pload
+```
+
+Verify the result and refresh shell integration if the current shell still
+has an older function loaded:
+
+```console
+pload --version
+pload cfg
+eval "$(pload shell-init zsh)"   # use bash/fish/powershell as appropriate
+```
+
+On systems enforcing PEP 668, do not force-install into the system Python;
+use pipx or the dedicated bootstrap environment shown above.
 
 ## First run
 

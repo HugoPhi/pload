@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.0 - 2026-09-24
+
+### Added
+
+- First stable release of the relocatable runtime and virtual-environment
+  manager.
+- README instructions for upgrading installer-managed, pipx, and bootstrap-
+  virtual-environment installations.
+
+### Fixed
+
+- Use the modern PEP 621 license metadata and production/stable classifier so
+  package builds no longer emit setuptools deprecation warnings.
+
 ## 0.9.6 - 2026-09-24
 
 ### Changed

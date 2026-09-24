@@ -3,6 +3,22 @@
 Changes are developed on a release branch and merged to `main` only after the
 release checklist passes. Each stable merge receives a matching annotated tag.
 
+## Pre-release testing
+
+Every release candidate is assigned a PEP 440 pre-release version such as
+`1.1.0a1`, `1.1.0b1` or `1.1.0rc1`; development builds must never present
+themselves as the current stable version.
+
+Before a pre-release is promoted or merged as a stable release:
+
+1. Build and run the full cross-platform CI matrix.
+2. Install the pre-release into the maintainer's private pload runtime on macOS.
+3. Preserve the existing `PLOAD_HOME`, environment registry, caches and managed
+   environments while replacing only the application runtime.
+4. Verify `pload --version`, the welcome page, help, Python discovery, environment
+   listing, and the new feature's primary workflow on that Mac.
+5. Keep the version as a pre-release until the maintainer explicitly accepts it.
+
 ## 0.4.x: portable foundation
 
 - Centralize filesystem and interpreter resolution.

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+Pre-release: `1.1.0a1`
+
 ### Added
 
 - Export exact package snapshots from managed and external Python environments,

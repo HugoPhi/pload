@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.3 - 2026-09-24
+
+### Changed
+
+- Put the emphasized, highlighted `usage` panel directly below each help title.
+- Add colored `▶` markers to table-section titles and space the welcome screen's
+  Simple usage and Global options tables apart.
+
 ## 0.9.2 - 2026-09-24
 
 ### Added

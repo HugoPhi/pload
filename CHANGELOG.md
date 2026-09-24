@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.5 - 2026-09-24
+
+### Changed
+
+- Left-align arrow-marked help section titles and give each two blank lines
+  above and one below.
+
 ## 0.9.4 - 2026-09-24
 
 ### Changed

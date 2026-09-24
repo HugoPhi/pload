@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="720" viewBox="0 0 1440 720" role="img" aria-labelledby="title desc">
+  <title id="title">pload list on macOS</title>
+  <desc id="desc">A macOS-style terminal showing pload list with environment IDs and descriptions.</desc>
+  <rect width="1440" height="720" fill="#10131a"/>
+  <rect x="70" y="48" width="1300" height="624" rx="18" fill="#171a21"/>
+  <rect x="70" y="48" width="1300" height="58" rx="18" fill="#252a35"/><rect x="70" y="88" width="1300" height="18" fill="#252a35"/>
+  <circle cx="104" cy="77" r="9" fill="#ff5f57"/><circle cx="136" cy="77" r="9" fill="#febc2e"/><circle cx="168" cy="77" r="9" fill="#28c840"/>
+  <text x="720" y="83" text-anchor="middle" fill="#b7bdc9" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="18">tibless — zsh — 120×28</text>
+  <g font-family="SFMono-Regular,Menlo,Consolas,monospace" font-size="22">
+    <text x="112" y="150" fill="#91a7ff">$</text><text x="138" y="150" fill="#e7eaf0">pload list</text>
+    <text x="112" y="203" fill="#73d7ff">╭────┬────────────────┬─────────┬──────────────────────┬────────────────────────────╮</text>
+    <text x="112" y="235" fill="#73d7ff">│ ID │ NAME           │ PYTHON  │ DESCRIPTION          │ PATH                       │</text>
+    <text x="112" y="267" fill="#73d7ff">├────┼────────────────┼─────────┼──────────────────────┼────────────────────────────┤</text>
+    <text x="112" y="299" fill="#72d6a5">│ v3 │ analytics      │ 3.12.8  │ Data analysis        │ /Users/tibless/venvs/...  │</text>
+    <text x="112" y="331" fill="#e7eaf0">│ v2 │ web-api        │ 3.11.9  │ Local API tools      │ /Users/tibless/venvs/...  │</text>
+    <text x="112" y="363" fill="#e7eaf0">│ v1 │ base           │ 3.10.17 │ Legacy environment   │ /Users/tibless/venvs/...  │</text>
+    <text x="112" y="395" fill="#73d7ff">╰────┴────────────────┴─────────┴──────────────────────┴────────────────────────────╯</text>
+    <text x="112" y="460" fill="#c7cbd4">Newest environments appear first; IDs are reusable after removal.</text>
+    <text x="112" y="520" fill="#91a7ff">$</text><text x="138" y="520" fill="#e7eaf0">pload v3</text>
+    <text x="112" y="560" fill="#72d6a5">(analytics)</text><text x="280" y="560" fill="#e7eaf0">$</text>
+  </g>
+</svg>

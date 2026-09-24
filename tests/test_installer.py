@@ -196,3 +196,16 @@ def test_installer_long_options_have_short_forms():
     assert args.home == "/tmp/pload"
     assert args.bin_dir == "/tmp/bin"
     assert args.no_runtime_install is True
+
+
+def test_post_install_welcome_screen_contains_ascii_and_next_steps(capsys, tmp_path):
+    settings = installer_args(tmp_path, shell="none")
+    installer.print_welcome_screen(
+        "0.8.7", Path(settings.home) / "bin" / "pload", vars(settings)
+    )
+
+    output = capsys.readouterr().out
+    assert "pload 0.8.7 is ready" in output
+    assert "____" in output
+    assert "pload cfg" in output
+    assert "pload new -n data -v 3.12" in output

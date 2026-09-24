@@ -1,5 +1,10 @@
 # pload
 
+![pload welcome screen on macOS](docs/images/pload-welcome-macos.svg)
+
+*A macOS example of the post-install welcome screen. The SVG is scalable, so it
+stays sharp in the repository and in a high-resolution browser view.*
+
 `pload` is a relocatable Python runtime and virtual-environment manager for
 Bash, Zsh, Fish, and PowerShell. The tool, downloaded Python runtimes, managed
 environments, state, and caches can all be placed in user-selected directories.
@@ -57,6 +62,10 @@ It then creates a private runtime under `PLOAD_HOME/runtime` and writes a stable
 `pload` executable into the selected `bin` directory. The executable does not
 depend on a project virtual environment, so deleting or activating an
 environment managed by pload cannot remove or shadow the tool itself.
+
+After installation, pload prints an ASCII welcome screen with the next commands,
+the launcher path, and the selected data directories. This makes the first
+successful run actionable without needing to remember another setup command.
 
 For a fully non-interactive installation:
 
@@ -173,6 +182,13 @@ does not disable uv's normal archive metadata and integrity handling.
 
 ## Create and activate environments
 
+The result is intentionally easy to scan in a terminal:
+
+![pload list on macOS](docs/images/pload-list-macos.svg)
+
+The newest environment appears first. IDs remain stable while an environment
+exists and are reused from the first available number after removal.
+
 ```console
 pload new --name data --description "Data analysis"
 pload new --name web --version 3.12 -d "Web development"
@@ -185,9 +201,10 @@ pload .                               # activate it
 pload init -r pytest requests         # install packages too
 ```
 
-Every environment created by pload receives a monotonic ID such as `v1`, `v2`,
-or `v3`. IDs are not reused after removal. Existing environments under the
-managed root are assigned IDs automatically the first time they are listed.
+Every environment created by pload receives a stable ID such as `v1`, `v2`, or
+`v3`. When an environment is removed, its first available ID can be reused.
+Existing environments under the managed root are assigned IDs automatically the
+first time they are listed.
 The ID registry is stored under the configurable state directory, so it remains
 inside the user's isolated pload layout.
 

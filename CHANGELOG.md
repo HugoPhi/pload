@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.8.7 - 2026-09-24
+
+### Added
+
+- Add an ASCII welcome screen after installation with copyable next steps and
+  the selected launcher and data paths.
+- Add macOS-style scalable terminal screenshots to the README for installation
+  and environment-list examples.
+
+### Changed
+
+- Expand the README with visual examples so the first-run experience is easier
+  to understand before installing.
+
 ## 0.8.6 - 2026-09-24
 
 ### Changed

@@ -156,9 +156,14 @@ class SnapshotManager:
                 if checksum and (bundle == "all" or normalized in selected):
                     for directory in [self.wheels] + [Path(p).expanduser() for p in links or []]:
                         for wheel in directory.glob("*.whl"):
+                            wheel_name = re.sub(r"[-_.]+", "-", wheel.name.split("-")[0].lower())
+                            if wheel_name != normalized:
+                                continue
                             if digest(wheel) == checksum:
                                 exact_wheels[pin] = str(wheel.absolute())
                                 break
+                        if pin in exact_wheels:
+                            break
                 if pin not in exact_wheels:
                     raise PloadError(
                         f"{package['name']} is a direct/local install: bundle its original wheel "

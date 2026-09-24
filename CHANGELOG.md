@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.5 - 2026-09-24
+
+### Changed
+
+- Reuse the first available environment ID after an environment is removed.
+- Display environments newest-first by creation time, with ID order only as a
+  deterministic tie-breaker.
+
 ## 0.8.4 - 2026-09-24
 
 ### Changed

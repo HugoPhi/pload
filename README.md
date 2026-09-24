@@ -206,7 +206,7 @@ Common commands have concise aliases:
 
 | Full command | Aliases |
 | --- | --- |
-| `pload new` | `pload n`, `pload create` |
+| `pload new` | — |
 | `pload init` | `pload i` |
 | `pload list` | `pload ls` |
 | `pload rm` | `pload remove`, `pload del`, `pload delete` |
@@ -215,11 +215,12 @@ Common commands have concise aliases:
 | `pload config` | `pload cfg` |
 | `pload shell-init` | `pload shell` |
 
-Python subcommands also accept `i`, `ls`, and `p`, for example:
+Python subcommands also accept `ls` and `p`; the explicit `install` command has
+no alias because it is already short and unambiguous:
 
 ```console
 pload py ls --filter uv,conda
-pload py i 3.12
+pload python install 3.12
 pload py p 3.12
 ```
 
@@ -235,8 +236,9 @@ pload-install -h         # compact installer guide
 pload-install -h -d      # guided prompts, resulting layout, and shell changes
 ```
 
-The `-d` option remains the description shorthand for `new` and `init` when
-`-h` is not present, so `pload n -d "Data analysis"` remains unambiguous.
+Every long option has a short spelling shown in help, for example
+`pload new -n data -v 3.12 -d "Data analysis"`. The `-d` option remains the
+description shorthand for `new` and `init` when `-h` is not present.
 Detailed help is intentionally task-oriented: the related-options table appears
 only after copyable commands, expected output, explanations, and on-disk effects.
 

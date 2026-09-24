@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.2 - 2026-09-24
+
+### Changed
+
+- Add consistent short aliases for every long CLI option, including `new -n`.
+- Keep already-clear commands spelled out: `new` and `python install` no longer
+  accept command aliases.
+- Update practical help examples and alias tables to match the command surface.
+
 ## 0.8.1 - 2026-09-24
 
 ### Changed

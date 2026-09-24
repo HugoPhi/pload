@@ -13,7 +13,7 @@ creates. You can delete an environment without deleting the `pload` command.
 ## Create, inspect, and enter an environment
 
 ```console
-$ pload n --name data --version 3.12 -d "Data analysis"
+$ pload new -n data --version 3.12 -d "Data analysis"
 ⠋ Creating data at /home/me/venvs/data
 ✓ Created data
 ✓ Assigned v1
@@ -33,9 +33,9 @@ and stable ID. `pload v1` activates it after shell integration is enabled.
 ## Install a Python without pyenv
 
 ```console
-$ pload py i 3.13
+$ pload python install 3.13
 $ pload py ls --filter uv
-$ pload n --name latest --version 3.13
+$ pload new -n latest --version 3.13
 ```
 
 The Python runtime is downloaded into the directory selected during setup. It
@@ -57,7 +57,7 @@ Use `pload cfg` to see the exact effective paths before creating anything.
 ## Typical example
 
 ```console
-$ pload n --name web --version 3.12 -d "Web API" -r fastapi uvicorn
+$ pload new -n web --version 3.12 -d "Web API" -r fastapi uvicorn
 ⠙ Creating web at /home/me/venvs/web
 ✓ Created web
 ✓ Assigned v3
@@ -208,7 +208,7 @@ one or when you add the command manually.
 ```console
 $ pload py ls
 $ pload py ls --filter sys,uv,conda
-$ pload py i 3.12
+$ pload python install 3.12
 $ pload py p 3.12
 ```
 
@@ -223,11 +223,11 @@ the operating system Python is never replaced.
 # Download a managed Python
 
 ```console
-$ pload py i 3.12
+$ pload python install 3.12
 Installing managed Python 3.12 into /home/me/.pload/pythons
 Installed Python 3.12: .../python3.12
 
-$ pload n --name data --version 3.12
+$ pload new -n data --version 3.12
 ```
 
 The version may be a minor request such as `3.12` or an exact patch such as

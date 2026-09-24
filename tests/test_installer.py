@@ -180,3 +180,17 @@ def test_installer_has_brief_and_detailed_help(capsys):
     assert "What the installer changes" in detailed
     assert "--downloads-json-url" in detailed
     assert "--pip-source" in detailed
+
+
+def test_installer_long_options_have_short_forms():
+    parser = installer.build_parser()
+    args = parser.parse_args([
+        "-H", "/tmp/pload", "-b", "/tmp/bin", "-E", "/tmp/venvs",
+        "-p", "/tmp/pythons", "-s", "official", "-m", "https://example.test",
+        "-j", "/tmp/downloads.json", "-P", "official", "-i", "https://pypi.org/simple",
+        "-k", "pload==0.8.1", "-S", "none", "-y", "-N",
+    ])
+
+    assert args.home == "/tmp/pload"
+    assert args.bin_dir == "/tmp/bin"
+    assert args.no_runtime_install is True

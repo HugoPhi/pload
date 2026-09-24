@@ -3,6 +3,7 @@ import os
 import shlex
 import subprocess
 import sys
+from argparse import Namespace
 from pathlib import Path
 
 from rich import box
@@ -344,7 +345,7 @@ def collect_settings(args):
         "state_dir": str(home / "state"),
         "pip_source": pip_source,
         "pip_index": pip_index,
-        "package_spec": args.package_spec or default_package_spec(),
+        "package_spec": args.package_spec or existing.get("package_spec") or default_package_spec(),
         "python": {
             "provider": "uv",
             "install_dir": str(python_dir),
@@ -358,6 +359,34 @@ def collect_settings(args):
         },
         "shell": shell,
     }
+
+
+def interactive_configure(home=None):
+    """Run the guided configuration wizard without reinstalling pload or uv."""
+    print_welcome()
+    args = Namespace(
+        home=str(home) if home else None,
+        bin_dir=None,
+        venvs_dir=None,
+        python_dir=None,
+        source=None,
+        mirror_url=None,
+        downloads_json_url=None,
+        pip_source=None,
+        pip_index=None,
+        package_spec=None,
+        shell=None,
+        yes=False,
+    )
+    settings = collect_settings(args)
+    path = save_settings(settings["home"], settings)
+    profile = configure_shell(settings)
+    print(f"[*] Wrote configuration: {path}")
+    if profile:
+        print(f"[*] Updated shell profile: {profile}")
+    else:
+        print(f"[!] Add {settings['bin_dir']} to PATH, then run: pload shell-init <shell>")
+    return path
 
 
 def detect_shell():

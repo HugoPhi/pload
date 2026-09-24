@@ -299,7 +299,15 @@ pload rm data
 pload rm data --yes
 pload rm --expression '^test-'
 pload config show
+pload cfg set source ustc
+pload cfg set pip-source tsinghua
+pload cfg set venvs-dir ~/venvs
+pload cfg -t
 ```
+
+`pload cfg set` changes one setting without reinstalling pload or uv. `pload
+cfg -t` reopens the colored setup wizard, reuses the current values as
+defaults, and updates only configuration plus the selected shell profile.
 
 ## Development
 

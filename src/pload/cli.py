@@ -261,18 +261,90 @@ Aliases: system=sys, managed=uv""",
 
     config = subparsers.add_parser(
         "config", aliases=COMMAND_ALIASES["config"],
-        help="inspect effective configuration",
+        help="inspect or change configuration",
     )
     config.add_argument(
-        "action", nargs="?", choices=["show"], default="show",
-        help="configuration action (default: show)",
+        "-t", "--interactive", "--tui", action="store_true",
+        help="reopen the guided configuration wizard without reinstalling pload",
     )
+    config.add_argument(
+        "action", nargs="?", choices=["show", "set"], default="show",
+        help="show configuration or set one value (default: show)",
+    )
+    config.add_argument("key", nargs="?", help="setting name for `config set`")
+    config.add_argument("value", nargs="?", help="new value for `config set`")
     return parser
 
 
 def add_packages(parser):
     parser.add_argument("--channel", "-c", help="Python package index URL")
     parser.add_argument("--requirements", "-r", nargs="+", help="packages to install")
+
+
+def _set_config_value(config, key, value):
+    """Update one user-facing setting while preserving the rest of config.json."""
+    from pload.settings import save_settings
+
+    aliases = {
+        "home": "home",
+        "bin-dir": "bin_dir",
+        "bin_dir": "bin_dir",
+        "venvs-dir": "venvs_dir",
+        "venvs_dir": "venvs_dir",
+        "state-dir": "state_dir",
+        "state_dir": "state_dir",
+        "python-dir": "python.install_dir",
+        "python_dir": "python.install_dir",
+        "source": "python.source",
+        "mirror-url": "python.mirror",
+        "mirror": "python.mirror",
+        "downloads-json-url": "python.downloads_json_url",
+        "pip-source": "pip_source",
+        "pip-index": "pip_index",
+        "shell": "shell",
+    }
+    normalized = aliases.get(key)
+    if normalized is None:
+        choices = ", ".join(sorted(aliases))
+        raise PloadError(f"unknown setting {key!r}; choose one of: {choices}")
+    if normalized == "python.source" and value not in {"official", "ustc", "custom"}:
+        raise PloadError("source must be official, ustc, or custom")
+    if normalized == "pip_source" and value not in {"official", "tsinghua", "ustc", "aliyun", "custom"}:
+        raise PloadError("pip-source must be official, tsinghua, ustc, aliyun, or custom")
+    if normalized == "shell" and value not in {"bash", "zsh", "fish", "powershell", "none"}:
+        raise PloadError("shell must be bash, zsh, fish, powershell, or none")
+    settings = dict(config.settings)
+    if normalized == "home":
+        raise PloadError("home is selected with -H/--home; use `pload cfg -t` to change it")
+    if "." in normalized:
+        section, field = normalized.split(".", 1)
+        settings.setdefault(section, {})[field] = value
+    else:
+        settings[normalized] = value
+    if normalized == "python.source":
+        from pload.settings import USTC_PYTHON_MIRROR
+
+        settings.setdefault("python", {})["mirror"] = (
+            USTC_PYTHON_MIRROR if value == "ustc" else None
+        )
+    elif normalized == "pip_source":
+        from pload.installer import (
+            PYPI_ALIYUN_INDEX,
+            PYPI_OFFICIAL_INDEX,
+            PYPI_TSINGHUA_INDEX,
+            PYPI_USTC_INDEX,
+        )
+
+        indexes = {
+            "official": PYPI_OFFICIAL_INDEX,
+            "tsinghua": PYPI_TSINGHUA_INDEX,
+            "ustc": PYPI_USTC_INDEX,
+            "aliyun": PYPI_ALIYUN_INDEX,
+        }
+        if value in indexes:
+            settings["pip_index"] = indexes[value]
+    path = save_settings(config.home, settings)
+    return path
 
 
 def _subparser_choices(parser):
@@ -520,6 +592,17 @@ def run(argv=None):
         return 0
 
     if command == "config":
+        if args.interactive:
+            from pload.installer import interactive_configure
+
+            interactive_configure(config.home)
+            return 0
+        if args.action == "set":
+            if not args.key or args.value is None:
+                raise PloadError("usage: pload cfg set SETTING VALUE")
+            path = _set_config_value(config, args.key, args.value)
+            print(f"[*] Updated configuration: {path}")
+            return 0
         effective = dict(config.settings)
         effective.update({
             "home": str(config.home),

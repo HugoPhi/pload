@@ -360,6 +360,10 @@ class RepositoryManager:
                                          host + ":" + pending])
                                 execute(["ssh", "-o", "BatchMode=yes", host,
                                          f"mv -n {shlex.quote(pending)} {shlex.quote(obj)}"])
+                            remote_hash = execute(["ssh", "-o", "BatchMode=yes", host,
+                                                   f"sha256sum {shlex.quote(obj)}"])
+                            if remote_hash.split()[0] != data["files"][filename]:
+                                raise PloadError("remote wheel checksum mismatch; snapshot not published")
                             execute(["ssh", "-o", "BatchMode=yes", host,
                                      f"ln {shlex.quote(obj)} {shlex.quote(stage + '/' + filename)}"])
                         else:
@@ -407,10 +411,14 @@ class RepositoryManager:
                 if remote.exists():
                     raise PloadError("remote snapshot already exists; choose a new snapshot name")
                 remote.parent.mkdir(parents=True, exist_ok=True)
-                remote.mkdir()
-                for filename in ["snapshot.json"] + list(data["files"]):
-                    (remote / filename).parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copyfile(target / filename, remote / filename)
+                with tempfile.TemporaryDirectory(prefix=".publish-", dir=str(remote.parent)) as pending:
+                    stage = Path(pending) / name
+                    stage.mkdir()
+                    for filename in ["snapshot.json"] + list(data["files"]):
+                        (stage / filename).parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copyfile(target / filename, stage / filename)
+                    validate_bundle(stage)
+                    stage.rename(remote)
                 if kind == "git":
                     execute(["git", "add", "--", "snapshots/" + name], cwd=checkout)
                     execute(["git", "commit", "-m", "Add pload snapshot " + name], cwd=checkout)

@@ -139,8 +139,11 @@ def test_brief_and_detailed_help_are_distinct(capsys):
 def test_command_specific_detailed_help_uses_d_flag(capsys):
     assert main(["new", "-h"]) == 0
     brief = capsys.readouterr().out
-    assert "Key options" in brief
+    assert "Arguments and options" in brief
     assert "pload new -h -d" in brief
+    assert "--name, -n" in brief
+    assert "--requirements, -r" in brief
+    assert "--home, -H" in brief
 
     assert main(["new", "-h", "-d"]) == 0
     detailed = capsys.readouterr().out
@@ -150,6 +153,26 @@ def test_command_specific_detailed_help_uses_d_flag(capsys):
     assert "Assigned v3" in detailed
     assert "Effects and failure behavior" in detailed
     assert "incomplete directory is removed" in normalized
+
+
+def test_brief_help_includes_positional_arguments_and_all_options(capsys):
+    assert main(["rm", "-h"]) == 0
+    remove_help = capsys.readouterr().out
+    assert "names" in remove_help
+    assert "--expression, -e" in remove_help
+    assert "--yes, -y" in remove_help
+
+    assert main(["cfg", "-h"]) == 0
+    config_help = capsys.readouterr().out
+    assert "action" in config_help
+    assert "key" in config_help
+    assert "value" in config_help
+    assert "--interactive" in config_help
+
+    assert main(["py", "install", "-h"]) == 0
+    install_help = capsys.readouterr().out
+    assert "version" in install_help
+    assert "--home, -H" in install_help
 
 
 def test_detailed_help_explains_command_effects(capsys):

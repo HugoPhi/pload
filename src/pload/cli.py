@@ -375,7 +375,7 @@ def _help_parser(parser, argv):
     return selected, command_path
 
 
-def _brief_help(parser, command_path):
+def _brief_help(parser, command_path, root_parser=None):
     console = Console(highlight=False)
     title = f"pload {__version__}" if not command_path else "pload " + " ".join(command_path)
     description = parser.description or "Command-line help"
@@ -426,16 +426,32 @@ def _brief_help(parser, command_path):
             console.print(table)
         else:
             table = Table(
-                title="Key options", box=box.SIMPLE,
+                title="Arguments and options", box=box.SIMPLE,
                 header_style="bold cyan", show_edge=False,
             )
-            table.add_column("OPTION", style="bold green", no_wrap=True)
+            table.add_column("ARGUMENT / OPTION", style="bold green", no_wrap=True)
             table.add_column("PURPOSE")
             for action in parser._actions:
-                if not action.option_strings or action.dest == "help":
+                if action.dest in {"help", "command", "python_command"}:
                     continue
-                table.add_row(", ".join(action.option_strings), action.help or "")
+                label = ", ".join(action.option_strings) if action.option_strings else action.dest
+                if action.nargs in {"+", "*"}:
+                    label += " ..."
+                table.add_row(label, action.help or "")
             console.print(table)
+
+    if command_path and root_parser is not None:
+        global_table = Table(
+            title="Global options (before the command)", box=box.SIMPLE,
+            header_style="bold cyan", show_edge=False,
+        )
+        global_table.add_column("OPTION", style="bold green", no_wrap=True)
+        global_table.add_column("PURPOSE")
+        for action in root_parser._actions:
+            if action.dest in {"help", "command"} or not action.option_strings:
+                continue
+            global_table.add_row(", ".join(action.option_strings), action.help or "")
+        console.print(global_table)
 
     detail_command = " ".join(command_path)
     detail = f"pload {detail_command} -h -d" if detail_command else "pload -h -d"
@@ -454,7 +470,7 @@ def render_help(argv):
                 canonical_path.append(PYTHON_COMMAND_NAMES.get(item, item))
         render_detailed_help(selected, canonical_path)
     else:
-        _brief_help(selected, command_path)
+        _brief_help(selected, command_path, root_parser=parser)
 
 
 def shell_script(shell):

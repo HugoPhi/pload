@@ -170,7 +170,8 @@ def test_installer_has_brief_and_detailed_help(capsys):
     brief = capsys.readouterr().out
     assert "colored, numbered guided setup" in brief
     assert "pload-install -h -d" in brief
-    assert "--downloads-json-url" not in brief
+    assert "--downloads-json-url" in brief
+    assert "--home, -H" in brief
 
     assert run(["-h", "-d"]) == 0
     detailed = capsys.readouterr().out

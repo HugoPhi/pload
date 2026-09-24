@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=77"]
+requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,8 +8,7 @@ version = "1.1.0a2"
 description = "A small, relocatable Python virtual environment manager"
 readme = "README.md"
 requires-python = ">=3.8"
-license = "Apache-2.0"
-license-files = ["LICENSE"]
+license = { file = "LICENSE" }
 authors = [{ name = "Yunming Hu", email = "hugonelsonm3@gmail.com" }]
 keywords = ["python", "venv", "virtual-environment", "pyenv"]
 classifiers = [

@@ -200,7 +200,8 @@ def test_brief_help_starts_with_highlighted_usage_for_aliases(capsys):
     assert main(["cfg", "-h"]) == 0
     output = capsys.readouterr().out
 
-    assert output.splitlines()[0].startswith("usage: pload cfg")
+    assert "▶ USAGE" in output
+    assert output.index("pload cfg") < output.index("▶ USAGE") < output.index("▶ Arguments")
 
 
 def test_no_arguments_show_welcome_and_simple_usage(capsys):
@@ -213,6 +214,7 @@ def test_no_arguments_show_welcome_and_simple_usage(capsys):
     assert "Global options" in output
     assert "pload new -n data -v 3.12" in output
     assert "pload -h -d" in output
+    assert output.index("Simple usage") < output.index("Global options")
 
 
 def test_new_without_options_uses_guided_creation(tmp_path, monkeypatch):

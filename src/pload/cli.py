@@ -379,7 +379,12 @@ def _help_parser(parser, argv):
 
 
 def _global_options_table(root_parser):
-    table = Table(title="Global options", box=box.SIMPLE, header_style="bold cyan", show_edge=False)
+    table = Table(
+        title="[bold cyan]▶ Global options[/]",
+        box=box.SIMPLE,
+        header_style="bold cyan",
+        show_edge=False,
+    )
     table.add_column("OPTION", style="bold green", no_wrap=True)
     table.add_column("PURPOSE")
     for action in root_parser._actions:
@@ -414,11 +419,15 @@ def _brief_help(parser, command_path, root_parser=None):
             usage_text.append(token, style="bold cyan")
         else:
             usage_text.append(token, style="white")
-    console.print(usage_text)
     console.print(Panel.fit(
         Text(description, style="white"),
         title=f"[bold cyan]{title}[/]",
         border_style="blue",
+    ))
+    console.print(Panel.fit(
+        usage_text,
+        title="[bold yellow]▶ USAGE[/]",
+        border_style="yellow",
     ))
 
     if not command_path:
@@ -445,6 +454,7 @@ def _brief_help(parser, command_path, root_parser=None):
         console.print("  [green]pload new -n data -m \"Data analysis\"[/]")
         console.print("  [green]pload ls[/]")
         console.print("  [green]pload v1[/]  [dim]# activate after shell initialization[/]")
+        console.print()
         console.print(_global_options_table(root_parser or parser))
     else:
         choices = _subparser_choices(parser)
@@ -464,7 +474,7 @@ def _brief_help(parser, command_path, root_parser=None):
             console.print(table)
         else:
             table = Table(
-                title="Arguments and options", box=box.SIMPLE,
+                title="[bold cyan]▶ Arguments and options[/]", box=box.SIMPLE,
                 header_style="bold cyan", show_edge=False,
             )
             table.add_column("ARGUMENT / OPTION", style="bold green", no_wrap=True)
@@ -512,7 +522,12 @@ def render_landing():
     console.print(art)
     console.print(f"[bold white]pload {__version__}[/]  [dim]Python environments, kept simple.[/]")
     console.print()
-    table = Table(title="Simple usage", box=box.SIMPLE, header_style="bold cyan", show_edge=False)
+    table = Table(
+        title="[bold cyan]▶ Simple usage[/]",
+        box=box.SIMPLE,
+        header_style="bold cyan",
+        show_edge=False,
+    )
     table.add_column("COMMAND", style="bold green", no_wrap=True)
     table.add_column("WHAT IT DOES")
     table.add_row("pload cfg", "Show where pload stores its data")
@@ -522,6 +537,7 @@ def render_landing():
     table.add_row("pload list", "List environments, IDs, and descriptions")
     table.add_row("pload v1", "Activate an environment by ID")
     console.print(table)
+    console.print()
     console.print(_global_options_table(build_parser()))
     console.print("\n[dim]More help: [bold]pload -h[/bold]  ·  examples: [bold]pload -h -d[/bold][/dim]")
 

@@ -379,6 +379,28 @@ def _brief_help(parser, command_path, root_parser=None):
     console = Console(highlight=False)
     title = f"pload {__version__}" if not command_path else "pload " + " ".join(command_path)
     description = parser.description or "Command-line help"
+    usage = " ".join(parser.format_usage().split())
+    if command_path and usage.startswith(f"usage: {parser.prog}"):
+        usage = usage.replace(
+            f"usage: {parser.prog}",
+            f"usage: {' '.join(['pload', *command_path])}",
+            1,
+        )
+    usage_text = Text()
+    for index, token in enumerate(usage.split()):
+        if index:
+            usage_text.append(" ")
+        if token == "usage:":
+            usage_text.append(token, style="dim")
+        elif token.startswith("pload"):
+            usage_text.append(token, style="bold green")
+        elif token.startswith("-"):
+            usage_text.append(token, style="bold yellow")
+        elif token.startswith(("[", "{")):
+            usage_text.append(token, style="bold cyan")
+        else:
+            usage_text.append(token, style="white")
+    console.print(usage_text)
     console.print(Panel.fit(
         Text(description, style="white"),
         title=f"[bold cyan]{title}[/]",

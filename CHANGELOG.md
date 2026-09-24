@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.9 - 2026-09-24
+
+### Changed
+
+- Rewrite the README around the current installer, configuration, Python
+  discovery, environment IDs, help system, and no-argument welcome screen.
+- Add a contents section and current macOS visual examples near the relevant
+  workflows.
+
 ## 0.8.8 - 2026-09-24
 
 ### Added

@@ -60,6 +60,19 @@ def test_official_pip_source_is_explicit(tmp_path):
     assert settings["pip_index"] == PYPI_OFFICIAL_INDEX
 
 
+def test_setup_preserves_repositories_and_custom_state(tmp_path):
+    from pload.settings import save_settings
+
+    original = {
+        "repositories": {"lab": {"kind": "ssh", "location": "host:/srv/pload"}},
+        "state_dir": str(tmp_path / "custom-state"),
+    }
+    save_settings(tmp_path / "pload", original)
+    collected = collect_settings(installer_args(tmp_path))
+    assert collected["repositories"] == original["repositories"]
+    assert collected["state_dir"] == original["state_dir"]
+
+
 def test_additional_pip_source_presets(tmp_path):
     ustc = collect_settings(installer_args(tmp_path, pip_source="ustc"))
     aliyun = collect_settings(installer_args(tmp_path, pip_source="aliyun"))

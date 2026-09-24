@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.8.0 - 2026-09-24
+
+### Added
+
+- Short command aliases including `ls`, `n`, `i`, `py`, `p`, and `cfg`.
+- Compact, colored quick help with `-h` and full Rich-formatted help with
+  `-h -d`, for both `pload` and `pload-install`.
+- A terminal-aware spinner while virtual environments are being created.
+
+### Changed
+
+- Shell integration recognizes every short and long command alias.
+- Spinner animations automatically fall back to stable log lines when output
+  is redirected or running in CI.
+
 ## 0.7.0 - 2026-09-24
 
 ### Added

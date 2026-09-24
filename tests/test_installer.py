@@ -163,3 +163,16 @@ def test_shell_configuration_updates_existing_managed_block(monkeypatch, tmp_pat
     assert "old setup" not in content
     assert settings["bin_dir"] in content
     assert content.count("# >>> pload initialize >>>") == 1
+
+
+def test_installer_has_brief_and_detailed_help(capsys):
+    assert run(["-h"]) == 0
+    brief = capsys.readouterr().out
+    assert "colored, numbered guided setup" in brief
+    assert "pload-install -h -d" in brief
+    assert "--downloads-json-url" not in brief
+
+    assert run(["-h", "-d"]) == 0
+    detailed = capsys.readouterr().out
+    assert "--downloads-json-url" in detailed
+    assert "--pip-source" in detailed

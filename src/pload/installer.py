@@ -5,6 +5,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+from rich import box
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from rich_argparse import RawDescriptionRichHelpFormatter
+
 from pload import __version__
 from pload.errors import PloadError
 from pload.managers.color import Colors
@@ -42,7 +48,7 @@ def build_parser():
             "Install pload into its own private runtime, create a stable executable in a "
             "user-selected bin directory, and configure managed Python downloads."
         ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+        formatter_class=RawDescriptionRichHelpFormatter,
         epilog="""Examples:
   pload-install
       Start the interactive installer.
@@ -91,6 +97,30 @@ numbered menu with an explanation for every option.""",
         help="write configuration only; useful for packaging and tests",
     )
     return parser
+
+
+def render_help(detailed=False):
+    parser = build_parser()
+    if detailed:
+        parser.print_help()
+        return
+    console = Console(highlight=False)
+    console.print(Panel.fit(
+        "Install pload into an isolated private runtime and choose every storage root.",
+        title="[bold cyan]pload-install[/]",
+        border_style="blue",
+    ))
+    table = Table(box=box.SIMPLE, header_style="bold cyan", show_edge=False)
+    table.add_column("COMMAND", style="bold green", no_wrap=True)
+    table.add_column("PURPOSE")
+    table.add_row("pload-install", "Start the colored, numbered guided setup")
+    table.add_row("pload-install --yes", "Reuse defaults without interactive questions")
+    table.add_row(
+        "pload-install --yes --home PATH",
+        "Install all pload data below a chosen root",
+    )
+    console.print(table)
+    console.print("[dim]Detailed help: [bold]pload-install -h -d[/bold][/dim]")
 
 
 def ask(prompt, default, non_interactive=False):
@@ -370,7 +400,11 @@ def configure_shell(settings):
 
 
 def run(argv=None):
-    args = build_parser().parse_args(argv)
+    raw_args = list(sys.argv[1:] if argv is None else argv)
+    if any(item in {"-h", "--help"} for item in raw_args):
+        render_help(any(item in {"-d", "--detailed", "--details"} for item in raw_args))
+        return 0
+    args = build_parser().parse_args(raw_args)
     if not args.yes:
         print_welcome()
     settings = collect_settings(args)

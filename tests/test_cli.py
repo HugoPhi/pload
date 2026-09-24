@@ -42,6 +42,13 @@ def test_shell_init_supports_all_documented_shells():
         assert "pload" in output
 
 
+def test_shell_init_recognizes_short_command_aliases():
+    for shell in ("bash", "zsh", "fish", "powershell"):
+        output = shell_script(shell)
+        for alias in ("ls", "n", "i", "py", "p", "cfg"):
+            assert alias in output
+
+
 def test_remove_refuses_environment_symlink(tmp_path, capsys):
     target = tmp_path / "target"
     target.mkdir()
@@ -78,6 +85,69 @@ def test_python_list_filter_accepts_comma_or_space_separated_types():
 
     assert comma.sources == ["uv,conda"]
     assert spaces.sources == ["uv", "conda"]
+
+
+def test_short_command_aliases_parse_to_supported_commands():
+    parser = build_parser()
+
+    assert parser.parse_args(["ls"]).command == "ls"
+    assert parser.parse_args(["n", "--name", "demo"]).command == "n"
+    assert parser.parse_args(["py", "ls"]).python_command == "ls"
+    assert parser.parse_args(["cfg"]).command == "cfg"
+
+
+def test_description_short_option_does_not_conflict_with_detailed_help():
+    args = build_parser().parse_args(["new", "-d", "Data tools"])
+
+    assert args.description == "Data tools"
+
+
+def test_brief_and_detailed_help_are_distinct(capsys):
+    assert main(["-h"]) == 0
+    brief = capsys.readouterr().out
+
+    assert "Quick start" in brief
+    assert "Detailed help: pload -h -d" in brief
+    assert "Isolation:" not in brief
+
+    assert main(["-h", "-d"]) == 0
+    detailed = capsys.readouterr().out
+
+    assert "Typical workflow:" in detailed
+    assert "Isolation:" in detailed
+    assert "--state-dir" in detailed
+
+
+def test_command_specific_detailed_help_uses_d_flag(capsys):
+    assert main(["new", "-h"]) == 0
+    brief = capsys.readouterr().out
+    assert "Key options" in brief
+    assert "pload new -h -d" in brief
+
+    assert main(["new", "-h", "-d"]) == 0
+    detailed = capsys.readouterr().out
+    assert "Examples:" in detailed
+    assert "--description" in detailed
+
+
+def test_help_finds_command_after_global_path_option(tmp_path, capsys):
+    assert main(["--home", str(tmp_path / "home"), "ls", "-h"]) == 0
+
+    output = capsys.readouterr().out
+    assert "pload ls" in output
+    assert "--expression" in output
+
+
+def test_list_alias_runs_against_isolated_state(tmp_path, capsys):
+    result = main([
+        "--home", str(tmp_path / "home"),
+        "--venvs-dir", str(tmp_path / "environments"),
+        "--state-dir", str(tmp_path / "state"),
+        "ls",
+    ])
+
+    assert result == 0
+    assert "DESCRIPTION" in capsys.readouterr().out
 
 
 def test_list_assigns_id_and_shows_description(tmp_path, capsys):

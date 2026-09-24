@@ -4,6 +4,13 @@ import re
 import sys
 from pathlib import Path
 
+from rich import box
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
+from rich_argparse import RawDescriptionRichHelpFormatter
+
 from pload import __version__
 from pload.display import print_environment_table, print_python_table
 from pload.errors import PloadError
@@ -11,6 +18,39 @@ from pload.managers.dependency import DependencyManager
 from pload.managers.platform import ConfigManager, PythonNotFoundError
 from pload.managers.pyversion import PythonManager
 from pload.managers.venv import VenvManager
+
+COMMAND_ALIASES = {
+    "new": ("n", "create"),
+    "init": ("i",),
+    "rm": ("remove", "del", "delete"),
+    "list": ("ls",),
+    "path": ("p",),
+    "shell-init": ("shell",),
+    "python": ("py",),
+    "config": ("cfg",),
+}
+PYTHON_ALIASES = {
+    "install": ("i",),
+    "list": ("ls",),
+    "path": ("p",),
+}
+COMMAND_NAMES = {
+    alias: canonical
+    for canonical, aliases in COMMAND_ALIASES.items()
+    for alias in (canonical,) + aliases
+}
+PYTHON_COMMAND_NAMES = {
+    alias: canonical
+    for canonical, aliases in PYTHON_ALIASES.items()
+    for alias in (canonical,) + aliases
+}
+HELP_FLAGS = {"-h", "--help"}
+DETAIL_FLAGS = {"-d", "--detailed", "--details"}
+
+
+RawDescriptionRichHelpFormatter.styles["argparse.groups"] = "bold cyan"
+RawDescriptionRichHelpFormatter.styles["argparse.args"] = "bold green"
+RawDescriptionRichHelpFormatter.styles["argparse.metavar"] = "bold yellow"
 
 
 def build_parser():
@@ -20,7 +60,7 @@ def build_parser():
             "Create, activate, and remove Python virtual environments without tying "
             "pload itself to any project environment."
         ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+        formatter_class=RawDescriptionRichHelpFormatter,
         epilog="""Typical workflow:
   pload python install 3.12        Download a managed Python when needed
   pload new --name data -v 3.12 -d "Data analysis"
@@ -34,7 +74,7 @@ Isolation:
   pload --venvs-dir /mnt/venvs new --name tools
   pload init --project-dir ./app --venv-dir /mnt/venvs/app
 
-Run `pload <command> -h` for command-specific examples.""",
+Run `pload <command> -h -d` for complete command-specific examples.""",
     )
     parser.add_argument("--home", help="data root (or set PLOAD_HOME)")
     parser.add_argument("--venvs-dir", help="managed environment root (or PLOAD_VENVS_DIR)")
@@ -43,12 +83,12 @@ Run `pload <command> -h` for command-specific examples.""",
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     new = subparsers.add_parser(
-        "new", help="create a managed environment",
+        "new", aliases=COMMAND_ALIASES["new"], help="create a managed environment",
         description=(
             "Create a virtual environment under the configured managed root, or at an "
             "explicit --path. The current Python is used when --version is omitted."
         ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+        formatter_class=RawDescriptionRichHelpFormatter,
         epilog="""Examples:
   pload new --name tools
   pload new --name data --version 3.12 -d "Data analysis" -r numpy pandas
@@ -62,12 +102,12 @@ Run `pload <command> -h` for command-specific examples.""",
     add_packages(new)
 
     init = subparsers.add_parser(
-        "init", help="create an environment for a project",
+        "init", aliases=COMMAND_ALIASES["init"], help="create an environment for a project",
         description=(
             "Create a project environment. A relative --venv-dir is resolved against "
             "--project-dir, so the command behaves consistently from any directory."
         ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+        formatter_class=RawDescriptionRichHelpFormatter,
         epilog="""Examples:
   pload init
   pload init --project-dir ./service --venv-dir .runtime/python -d "Service tools"
@@ -83,12 +123,12 @@ Run `pload <command> -h` for command-specific examples.""",
     add_packages(init)
 
     remove = subparsers.add_parser(
-        "rm", aliases=["remove"], help="remove environments",
+        "rm", aliases=COMMAND_ALIASES["rm"], help="remove environments",
         description=(
             "Remove environments by stable ID or name, or select managed environments with a regular "
             "expression. Active environments and symbolic links are never removed."
         ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+        formatter_class=RawDescriptionRichHelpFormatter,
         epilog="""Examples:
   pload rm v1
   pload rm data
@@ -103,12 +143,12 @@ Run `pload <command> -h` for command-specific examples.""",
     remove.add_argument("--yes", "-y", action="store_true")
 
     listing = subparsers.add_parser(
-        "list", help="list managed environments",
+        "list", aliases=COMMAND_ALIASES["list"], help="list managed environments",
         description=(
             "List registered environments in a readable table. Legacy environments under "
             "the managed root are assigned stable IDs automatically."
         ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+        formatter_class=RawDescriptionRichHelpFormatter,
         epilog="""Examples:
   pload list
   pload list --expression '^(v1|data)$'
@@ -119,24 +159,27 @@ Run `pload <command> -h` for command-specific examples.""",
     listing.add_argument("--python-versions", "--version", "-v", action="store_true")
 
     path = subparsers.add_parser(
-        "path", help="print an environment or activation path by ID, name, or path"
+        "path", aliases=COMMAND_ALIASES["path"],
+        help="print an environment or activation path by ID, name, or path",
     )
     path.add_argument("name")
     path.add_argument("--project-dir", default=".")
     path.add_argument("--shell", choices=["bash", "zsh", "fish", "powershell"])
 
     shell_init = subparsers.add_parser(
-        "shell-init", help="print shell integration; evaluate it from your profile"
+        "shell-init", aliases=COMMAND_ALIASES["shell-init"],
+        help="print shell integration; evaluate it from your profile",
     )
     shell_init.add_argument("shell", choices=["bash", "zsh", "fish", "powershell"])
 
     python = subparsers.add_parser(
-        "python", help="install and inspect Python runtimes",
+        "python", aliases=COMMAND_ALIASES["python"],
+        help="install and inspect Python runtimes",
         description=(
             "Manage isolated Python runtimes through uv. Downloads are stored under "
             "PLOAD_HOME by default and respect the mirror selected by pload-install."
         ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+        formatter_class=RawDescriptionRichHelpFormatter,
         epilog="""Examples:
   pload python install 3.12
   pload python install 3.12.8
@@ -152,17 +195,18 @@ Run `pload config show` to inspect the download source and install directory."""
     )
     python_commands = python.add_subparsers(dest="python_command", required=True)
     python_install = python_commands.add_parser(
-        "install", help="download a Python runtime with the configured source"
+        "install", aliases=PYTHON_ALIASES["install"],
+        help="download a Python runtime with the configured source",
     )
     python_install.add_argument("version", help="version request, for example 3.12 or 3.12.8")
     python_list = python_commands.add_parser(
-        "list",
+        "list", aliases=PYTHON_ALIASES["list"],
         help="discover all usable Python interpreters",
         description=(
             "Discover usable Python 3 interpreters and show their version, source type, "
             "and resolved executable path."
         ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+        formatter_class=RawDescriptionRichHelpFormatter,
         epilog="""Examples:
   pload python list
   pload python list --filter uv,conda
@@ -179,10 +223,16 @@ Aliases: system=sys, managed=uv""",
         metavar="TYPE",
         help="source types, separated by commas or spaces",
     )
-    python_path = python_commands.add_parser("path", help="resolve an installed interpreter")
+    python_path = python_commands.add_parser(
+        "path", aliases=PYTHON_ALIASES["path"],
+        help="resolve an installed interpreter",
+    )
     python_path.add_argument("version")
 
-    config = subparsers.add_parser("config", help="inspect effective configuration")
+    config = subparsers.add_parser(
+        "config", aliases=COMMAND_ALIASES["config"],
+        help="inspect effective configuration",
+    )
     config.add_argument("action", nargs="?", choices=["show"], default="show")
     return parser
 
@@ -192,11 +242,114 @@ def add_packages(parser):
     parser.add_argument("--requirements", "-r", nargs="+", help="packages to install")
 
 
+def _subparser_choices(parser):
+    for action in parser._actions:
+        choices = getattr(action, "choices", None)
+        if isinstance(choices, dict):
+            return choices
+    return {}
+
+
+def _help_parser(parser, argv):
+    """Resolve the deepest command named before a help flag."""
+    selected = parser
+    command_path = []
+    tokens = [item for item in argv if item not in HELP_FLAGS | DETAIL_FLAGS]
+    command_found = False
+    for token in tokens:
+        if token.startswith("-"):
+            continue
+        choices = _subparser_choices(selected)
+        if token not in choices:
+            if command_found:
+                break
+            continue
+        selected = choices[token]
+        command_path.append(token)
+        command_found = True
+    return selected, command_path
+
+
+def _brief_help(parser, command_path):
+    console = Console(highlight=False)
+    title = f"pload {__version__}" if not command_path else "pload " + " ".join(command_path)
+    description = parser.description or "Command-line help"
+    console.print(Panel.fit(
+        Text(description, style="white"),
+        title=f"[bold cyan]{title}[/]",
+        border_style="blue",
+    ))
+
+    if not command_path:
+        table = Table(box=box.SIMPLE, header_style="bold cyan", show_edge=False)
+        table.add_column("COMMAND", style="bold green", no_wrap=True)
+        table.add_column("ALIASES", style="yellow", no_wrap=True)
+        table.add_column("PURPOSE")
+        summaries = {
+            "new": "Create a managed virtual environment",
+            "init": "Create a project-local environment",
+            "list": "List environments and their stable IDs",
+            "rm": "Remove an environment by ID or name",
+            "python": "Discover or install Python runtimes",
+            "path": "Print an environment path",
+            "config": "Show effective configuration",
+            "shell-init": "Print shell activation integration",
+        }
+        for command in ("new", "init", "list", "rm", "python", "path", "config", "shell-init"):
+            table.add_row(command, ", ".join(COMMAND_ALIASES[command]), summaries[command])
+        console.print(table)
+        console.print("[bold cyan]Quick start[/]")
+        console.print("  [green]pload n --name data -d \"Data analysis\"[/]")
+        console.print("  [green]pload ls[/]")
+        console.print("  [green]pload v1[/]  [dim]# activate after shell initialization[/]")
+    else:
+        choices = _subparser_choices(parser)
+        if choices:
+            table = Table(box=box.SIMPLE, header_style="bold cyan", show_edge=False)
+            table.add_column("SUBCOMMAND", style="bold green")
+            table.add_column("PURPOSE")
+            seen = set()
+            for name, child in choices.items():
+                canonical = PYTHON_COMMAND_NAMES.get(name, name)
+                if canonical in seen:
+                    continue
+                seen.add(canonical)
+                aliases = PYTHON_ALIASES.get(canonical, ())
+                label = canonical + (f" ({', '.join(aliases)})" if aliases else "")
+                table.add_row(label, child.description or "See detailed help")
+            console.print(table)
+        else:
+            table = Table(
+                title="Key options", box=box.SIMPLE,
+                header_style="bold cyan", show_edge=False,
+            )
+            table.add_column("OPTION", style="bold green", no_wrap=True)
+            table.add_column("PURPOSE")
+            for action in parser._actions:
+                if not action.option_strings or action.dest == "help":
+                    continue
+                table.add_row(", ".join(action.option_strings), action.help or "")
+            console.print(table)
+
+    detail_command = " ".join(command_path)
+    detail = f"pload {detail_command} -h -d" if detail_command else "pload -h -d"
+    console.print(f"\n[dim]Detailed help: [bold]{detail}[/bold][/dim]")
+
+
+def render_help(argv):
+    parser = build_parser()
+    selected, command_path = _help_parser(parser, argv)
+    if any(item in DETAIL_FLAGS for item in argv):
+        selected.print_help()
+    else:
+        _brief_help(selected, command_path)
+
+
 def shell_script(shell):
     if shell in {"bash", "zsh"}:
         return r'''pload() {
     case "${1:-}" in
-        new|init|rm|remove|list|path|shell-init|python|config|-*)
+        new|n|create|init|i|rm|remove|del|delete|list|ls|path|p|shell-init|shell|python|py|config|cfg|-*)
             command pload "$@"
             ;;
         *)
@@ -209,7 +362,7 @@ def shell_script(shell):
     if shell == "fish":
         return r'''function pload
     switch "$argv[1]"
-        case new init rm remove list path shell-init python config '-*'
+        case new n create init i rm remove del delete list ls path p shell-init shell python py config cfg '-*'
             command pload $argv
         case '*'
             set -l name .
@@ -223,7 +376,7 @@ def shell_script(shell):
 end'''
     return r'''function pload {
     param([Parameter(ValueFromRemainingArguments = $true)][string[]]$PloadArgs)
-    $commands = @('new', 'init', 'rm', 'remove', 'list', 'path', 'shell-init', 'python', 'config', '-h', '--help', '--version')
+    $commands = @('new', 'n', 'create', 'init', 'i', 'rm', 'remove', 'del', 'delete', 'list', 'ls', 'path', 'p', 'shell-init', 'shell', 'python', 'py', 'config', 'cfg', '-h', '--help', '--version')
     $backend = Get-Command -Name @('pload.exe', 'pload.cmd') -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $backend) { throw 'pload executable not found on PATH' }
     if ($PloadArgs.Count -gt 0 -and ($commands -contains $PloadArgs[0] -or $PloadArgs[0].StartsWith('-'))) {
@@ -237,12 +390,17 @@ end'''
 
 
 def run(argv=None):
-    args = build_parser().parse_args(argv)
+    raw_args = list(sys.argv[1:] if argv is None else argv)
+    if any(item in HELP_FLAGS for item in raw_args):
+        render_help(raw_args)
+        return 0
+    args = build_parser().parse_args(raw_args)
+    command = COMMAND_NAMES.get(args.command, args.command)
     config = ConfigManager(args.home, args.venvs_dir, args.state_dir)
     venvs = VenvManager(config)
     dependencies = DependencyManager(config)
 
-    if args.command == "new":
+    if command == "new":
         path = venvs.create_venv(
             version=args.python_version,
             message=args.message,
@@ -253,7 +411,7 @@ def run(argv=None):
         dependencies.install_dependencies(path, args.requirements, args.channel)
         return 0
 
-    if args.command == "init":
+    if command == "init":
         project = Path(args.project_dir).expanduser().resolve()
         project.mkdir(parents=True, exist_ok=True)
         path = venvs.create_venv(
@@ -266,7 +424,7 @@ def run(argv=None):
         dependencies.install_dependencies(path, args.requirements, args.channel)
         return 0
 
-    if args.command in {"rm", "remove"}:
+    if command == "rm":
         names = list(dict.fromkeys(args.names + args.envs))
         if args.expression:
             pattern = re.compile(args.expression)
@@ -282,7 +440,7 @@ def run(argv=None):
             venvs.remove_venv(name, project_dir=args.project_dir)
         return 0
 
-    if args.command == "list":
+    if command == "list":
         pattern = re.compile(args.expression)
         if args.python_versions:
             for version in PythonManager(config).get_installed_versions():
@@ -297,7 +455,7 @@ def run(argv=None):
             print_environment_table(environments)
         return 0
 
-    if args.command == "path":
+    if command == "path":
         if args.shell:
             print(venvs.activation_script(
                 args.name, shell=args.shell, project_dir=args.project_dir
@@ -306,21 +464,22 @@ def run(argv=None):
             print(venvs.resolve_existing(args.name, project_dir=args.project_dir))
         return 0
 
-    if args.command == "shell-init":
+    if command == "shell-init":
         print(shell_script(args.shell))
         return 0
 
-    if args.command == "python":
+    if command == "python":
         manager = PythonManager(config)
-        if args.python_command == "install":
+        python_command = PYTHON_COMMAND_NAMES.get(args.python_command, args.python_command)
+        if python_command == "install":
             manager.install_python(args.version)
-        elif args.python_command == "list":
+        elif python_command == "list":
             print_python_table(manager.discover(args.sources))
-        elif args.python_command == "path":
+        elif python_command == "path":
             print(config.get_python_path(args.version))
         return 0
 
-    if args.command == "config":
+    if command == "config":
         effective = dict(config.settings)
         effective.update({
             "home": str(config.home),

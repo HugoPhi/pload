@@ -196,6 +196,48 @@ and full path. Color is enabled on terminals and can be disabled with the
 standard `NO_COLOR` environment variable. `--version` also accepts an exact
 interpreter path.
 
+Environment creation displays a lightweight spinner in an interactive terminal.
+When output is redirected, or when running in CI, pload automatically emits
+ordinary stable log lines instead.
+
+## Short aliases and help
+
+Common commands have concise aliases:
+
+| Full command | Aliases |
+| --- | --- |
+| `pload new` | `pload n`, `pload create` |
+| `pload init` | `pload i` |
+| `pload list` | `pload ls` |
+| `pload rm` | `pload remove`, `pload del`, `pload delete` |
+| `pload python` | `pload py` |
+| `pload path` | `pload p` |
+| `pload config` | `pload cfg` |
+| `pload shell-init` | `pload shell` |
+
+Python subcommands also accept `i`, `ls`, and `p`, for example:
+
+```console
+pload py ls --filter uv,conda
+pload py i 3.12
+pload py p 3.12
+```
+
+Help has two levels:
+
+```console
+pload -h                 # compact colored command guide
+pload -h -d              # complete global reference
+pload new -h             # compact command help
+pload new -h -d          # complete options and examples
+pload py ls -h -d        # detailed nested-command help
+pload-install -h         # compact installer guide
+pload-install -h -d      # complete installer reference
+```
+
+The `-d` option remains the description shorthand for `new` and `init` when
+`-h` is not present, so `pload n -d "Data analysis"` remains unambiguous.
+
 ## Directory isolation
 
 Put all pload-managed data under one root:
@@ -236,10 +278,10 @@ Existing 0.3 installations are detected automatically when a populated
 
 ```console
 pload -h
-pload new -h
-pload init -h
-pload python -h
-pload-install -h
+pload new -h -d
+pload init -h -d
+pload python -h -d
+pload-install -h -d
 ```
 
 Other useful commands:

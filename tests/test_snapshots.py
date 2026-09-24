@@ -138,6 +138,11 @@ def test_commands_and_shell_integration(capsys):
     assert "--bundle" in capsys.readouterr().out
 
 
+def test_repository_list_alias(tmp_path, capsys):
+    assert main(["-H", str(tmp_path), "repo", "ls"]) == 0
+    assert capsys.readouterr().out.strip() == "{}"
+
+
 def test_source_credentials_are_not_recorded():
     assert public_index("https://user:secret@example.com/simple?token=secret") == (
         "https://example.com/simple"

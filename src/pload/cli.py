@@ -309,7 +309,7 @@ Aliases: system=sys, managed=uv""",
     add.add_argument("location", help="directory, HOST:/absolute/path, or Git URL")
     add.add_argument("--type", "-t", choices=["local", "ssh", "git"], default="local",
                      help="transport (default: local)")
-    actions.add_parser("list", description="Show configured repositories.")
+    actions.add_parser("list", aliases=["ls"], description="Show configured repositories.")
     remove = actions.add_parser("remove", description="Remove configuration, keeping all remote files.")
     remove.add_argument("name", help="repository nickname")
     for verb in ("push", "pull"):
@@ -706,7 +706,7 @@ def run(argv=None):
                 repositories.add(args.name, args.location, args.type)
             elif args.repo_command == "remove":
                 repositories.remove(args.name)
-            elif args.repo_command == "list":
+            elif args.repo_command in {"list", "ls"}:
                 print(json.dumps(repositories.repositories(), indent=2))
             else:
                 repositories.transfer(args.repository, args.snapshot, args.repo_command == "push")

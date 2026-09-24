@@ -67,6 +67,10 @@ This selects the newest discovered Python matching `3.12`, creates `web` below
 the managed environment root, stores the description, assigns the next ID, and
 then installs `fastapi` and `uvicorn` inside that environment.
 
+If `--name` is omitted, pload generates a short unique name such as
+`python-3.12` or `python-3.12-2`. Use `--message` (or `-d`) for the human
+description; it never affects the generated directory name.
+
 ## Choose an exact location or interpreter
 
 ```console
@@ -246,10 +250,10 @@ The version may be a minor request such as `3.12` or an exact patch such as
 
 ```console
 $ pload py ls
-ID / ALIAS              VERSION   TYPE      PATH
-py1:conda-v3.11.9       3.11.9    conda     /opt/miniforge/envs/data/bin/python
-py2:uv-v3.12.8          3.12.8    uv        /home/me/.pload/pythons/.../python3.12
-py3:homebrew-v3.13.3    3.13.3    homebrew  /opt/homebrew/.../python3.13
+ID   ALIAS             VERSION   TYPE      PATH
+py1  conda-v3.11.9     3.11.9    conda     /opt/miniforge/envs/data/bin/python
+py2  uv-v3.12.8        3.12.8    uv        /home/me/.pload/pythons/.../python3.12
+py3  homebrew-v3.13.3  3.13.3    homebrew  /opt/homebrew/.../python3.13
 
 $ pload py ls --filter uv,conda
 ```

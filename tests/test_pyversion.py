@@ -66,7 +66,7 @@ def test_runtime_table_includes_type_and_path():
         PythonRuntime("3.11.9", "conda", conda_path),
     ])
 
-    assert lines[0].split() == ["ID", "/", "ALIAS", "VERSION", "TYPE", "PATH"]
+    assert lines[0].split() == ["ID", "ALIAS", "VERSION", "TYPE", "PATH"]
     assert any("3.12.8" in line and "uv" in line and str(uv_path) in line for line in lines)
     assert any("3.11.9" in line and "conda" in line for line in lines)
 

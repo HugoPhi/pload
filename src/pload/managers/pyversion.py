@@ -226,15 +226,17 @@ class PythonManager:
     def format_runtimes(runtimes):
         if not runtimes:
             return []
-        id_width = max([10] + [len(item.display_id) for item in runtimes])
+        id_width = max([4] + [len(item.id or "-") for item in runtimes])
+        alias_width = max([5] + [len(item.alias or "-") for item in runtimes])
         version_width = max([7] + [len(item.version) for item in runtimes])
         source_width = max([4] + [len(item.source) for item in runtimes])
         lines = [
-            f"{'ID / ALIAS':<{id_width}}  {'VERSION':<{version_width}}  {'TYPE':<{source_width}}  PATH",
-            f"{'-' * id_width}  {'-' * version_width}  {'-' * source_width}  {'-' * 4}",
+            f"{'ID':<{id_width}}  {'ALIAS':<{alias_width}}  {'VERSION':<{version_width}}  {'TYPE':<{source_width}}  PATH",
+            f"{'-' * id_width}  {'-' * alias_width}  {'-' * version_width}  {'-' * source_width}  {'-' * 4}",
         ]
         lines.extend(
-            f"{item.display_id:<{id_width}}  {item.version:<{version_width}}  {item.source:<{source_width}}  {item.path}"
+            f"{item.id or '-':<{id_width}}  {item.alias or '-':<{alias_width}}  "
+            f"{item.version:<{version_width}}  {item.source:<{source_width}}  {item.path}"
             for item in runtimes
         )
         return lines

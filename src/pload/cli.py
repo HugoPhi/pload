@@ -93,13 +93,12 @@ Run `pload <command> -h -d` for complete command-specific examples.""",
         "--version", "-v", dest="python_version",
         help="Python version request or exact interpreter path",
     )
-    new.add_argument(
-        "--message", "-m", default="normal",
-        help="legacy suffix used only when --name is omitted",
-    )
     new.add_argument("--name", "-n", help="exact environment name")
     new.add_argument("--path", "-p", help="exact destination instead of the managed root")
-    new.add_argument("--description", "-d", help="human-readable purpose shown by pload list")
+    new.add_argument(
+        "--message", "-d", dest="description",
+        help="human-readable purpose shown by pload list",
+    )
     add_packages(new)
 
     init = subparsers.add_parser(
@@ -123,7 +122,10 @@ Run `pload <command> -h -d` for complete command-specific examples.""",
         "--venv-dir", "-e", default=".venv",
         help="environment path, relative to --project-dir or absolute",
     )
-    init.add_argument("--description", "-d", help="human-readable purpose shown by pload list")
+    init.add_argument(
+        "--message", "-d", dest="description",
+        help="human-readable purpose shown by pload list",
+    )
     add_packages(init)
 
     remove = subparsers.add_parser(
@@ -582,7 +584,6 @@ def run(argv=None):
     if command == "new":
         path = venvs.create_venv(
             version=args.python_version,
-            message=args.message,
             target=args.path,
             name=args.name,
             description=args.description,

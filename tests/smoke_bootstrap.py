@@ -33,7 +33,7 @@ def main():
         [str(launcher), "py", "p", "3.12"],
         [
             str(launcher), "new", "-n", "smoke", "-v", "3.12",
-            "--description", "Cross-platform smoke environment",
+            "--message", "Cross-platform smoke environment",
         ],
         [str(launcher), "ls"],
         [str(launcher), "p", "v1"],

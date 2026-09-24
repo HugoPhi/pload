@@ -19,7 +19,6 @@ class VenvManager:
     def create_venv(
         self,
         version=None,
-        message="normal",
         is_local=False,
         project_dir=None,
         target=None,
@@ -29,7 +28,6 @@ class VenvManager:
         try:
             target_path, display_name = self.config.resolve_venv_path(
                 version=version,
-                message=message,
                 is_local=is_local,
                 project_dir=project_dir,
                 target=target,

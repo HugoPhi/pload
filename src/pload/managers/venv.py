@@ -143,8 +143,14 @@ class VenvManager:
                     self._write_registry(data)
                 return entry
 
-        used = {self._id_number(item.get("id")) for item in data["environments"]}
-        next_id = max(int(data.get("next_id", 1)), max(used or {0}) + 1)
+        used = {
+            self._id_number(item.get("id"))
+            for item in data["environments"]
+            if self._id_number(item.get("id")) > 0
+        }
+        next_id = 1
+        while next_id in used:
+            next_id += 1
         entry = {
             "id": f"v{next_id}",
             "name": name or resolved.name,
@@ -153,7 +159,9 @@ class VenvManager:
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
         data["environments"].append(entry)
-        data["next_id"] = next_id + 1
+        # Keep this legacy field useful for older readers, while allocation above
+        # always scans for the first available ID so deleted IDs are reusable.
+        data["next_id"] = max(used | {next_id}) + 1
         self._write_registry(data)
         return entry
 
@@ -181,7 +189,20 @@ class VenvManager:
                 item = dict(entry)
                 item["python"] = self.environment_python_version(path)
                 result.append(item)
-        return sorted(result, key=lambda item: self._id_number(item.get("id")))
+        def created_key(item):
+            stamp = item.get("created_at") or ""
+            try:
+                return datetime.fromisoformat(stamp).timestamp()
+            except (TypeError, ValueError, OverflowError):
+                return 0
+
+        # Newest environments are easiest to find at the top. ID order is only
+        # a deterministic tie-breaker for old registries without timestamps.
+        return sorted(
+            result,
+            key=lambda item: (created_key(item), self._id_number(item.get("id"))),
+            reverse=True,
+        )
 
     @staticmethod
     def environment_python_version(path):

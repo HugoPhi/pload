@@ -240,6 +240,11 @@ Every brief `-h` view lists all positional arguments and all options with their
 short and long spellings. The `-d` form keeps that reference and adds practical
 examples, expected output, side effects, and failure behavior.
 
+Environment IDs are stable while an environment exists, and deleted IDs are
+reused from the first available number. `pload list` displays environments
+newest-first by creation time so the most recently created entry is always at
+the top.
+
 Every long option has a short spelling shown in help, for example
 `pload new -n data -v 3.12 -d "Data analysis"`. The `-d` option remains the
 description shorthand for `new` and `init` when `-h` is not present.

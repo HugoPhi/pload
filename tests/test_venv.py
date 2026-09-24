@@ -24,14 +24,14 @@ def test_legacy_environments_receive_stable_ids(tmp_path):
     second = manager.environments()
 
     assert [(item["id"], item["name"]) for item in first] == [
-        ("v1", "alpha"),
         ("v2", "beta"),
+        ("v1", "alpha"),
     ]
     assert first == second
-    assert first[1]["python"] == "3.11.9"
+    assert first[0]["python"] == "3.11.9"
 
 
-def test_environment_ids_are_not_reused_after_removal(tmp_path):
+def test_environment_ids_reuse_the_first_available_number(tmp_path):
     root = tmp_path / "environments"
     first_path = make_environment(root / "first")
     second_path = make_environment(root / "second")
@@ -44,9 +44,27 @@ def test_environment_ids_are_not_reused_after_removal(tmp_path):
     third = manager.register_environment(third_path)
 
     assert second["id"] == "v2"
-    assert third["id"] == "v3"
+    assert third["id"] == "v1"
     registry = json.loads(manager.registry_path.read_text(encoding="utf-8"))
-    assert registry["next_id"] == 4
+    assert registry["next_id"] == 3
+
+
+def test_environment_list_is_newest_first_even_when_ids_are_reused(tmp_path):
+    root = tmp_path / "environments"
+    first_path = make_environment(root / "first")
+    second_path = make_environment(root / "second")
+    manager = VenvManager(ConfigManager(home=tmp_path / "home", venvs_dir=root))
+    first = manager.register_environment(first_path)
+    second = manager.register_environment(second_path)
+
+    manager.remove_venv(first["id"])
+    third_path = make_environment(root / "third")
+    third = manager.register_environment(third_path)
+
+    entries = manager.environments()
+    assert [entry["name"] for entry in entries] == ["third", "second"]
+    assert [entry["id"] for entry in entries] == ["v1", "v2"]
+    assert third["created_at"] > second["created_at"]
 
 
 def test_description_is_preserved_when_legacy_scan_runs(tmp_path):

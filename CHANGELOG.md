@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.4 - 2026-09-24
+
+### Changed
+
+- Make every brief `-h` view list all positional arguments and options with
+  concise descriptions.
+- Show global options alongside command-specific options.
+- Keep `-d` focused on examples, explanations, effects, and failure behavior.
+
 ## 0.8.3 - 2026-09-24
 
 ### Added

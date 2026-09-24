@@ -207,6 +207,17 @@ profile unless `--shell` is supplied or already saved in the configuration.
         "Install all pload data below a chosen root",
     )
     console.print(table)
+    options = Table(
+        title="All options", box=box.SIMPLE,
+        header_style="bold cyan", show_edge=False,
+    )
+    options.add_column("OPTION", style="bold green", no_wrap=True)
+    options.add_column("PURPOSE")
+    for action in parser._actions:
+        if action.dest == "help" or not action.option_strings:
+            continue
+        options.add_row(", ".join(action.option_strings), action.help or "")
+    console.print(options)
     console.print("[dim]Detailed help: [bold]pload-install -h -d[/bold][/dim]")
 
 

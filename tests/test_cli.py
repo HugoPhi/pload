@@ -128,11 +128,12 @@ def test_command_specific_detailed_help_uses_d_flag(capsys):
 
     assert main(["new", "-h", "-d"]) == 0
     detailed = capsys.readouterr().out
+    normalized = " ".join(detailed.split())
     assert "Typical example" in detailed
     assert "$ pload n --name web" in detailed
     assert "Assigned v3" in detailed
     assert "Effects and failure behavior" in detailed
-    assert "incomplete directory is removed" in detailed
+    assert "incomplete directory is removed" in normalized
 
 
 def test_detailed_help_explains_command_effects(capsys):

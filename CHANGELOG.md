@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.4 - 2026-09-24
+
+### Changed
+
+- Remove the redundant `usage:` prefix inside the dedicated `▶ USAGE` panel.
+
 ## 0.9.3 - 2026-09-24
 
 ### Changed

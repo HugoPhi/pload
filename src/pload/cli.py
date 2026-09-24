@@ -406,12 +406,13 @@ def _brief_help(parser, command_path, root_parser=None):
             1,
         )
     usage_text = Text()
-    for index, token in enumerate(usage.split()):
+    usage_tokens = usage.split()
+    if usage_tokens and usage_tokens[0] == "usage:":
+        usage_tokens = usage_tokens[1:]
+    for index, token in enumerate(usage_tokens):
         if index:
             usage_text.append(" ")
-        if token == "usage:":
-            usage_text.append(token, style="dim")
-        elif token.startswith("pload"):
+        if token.startswith("pload"):
             usage_text.append(token, style="bold green")
         elif token.startswith("-"):
             usage_text.append(token, style="bold yellow")

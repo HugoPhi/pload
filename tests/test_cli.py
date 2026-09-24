@@ -187,13 +187,13 @@ def test_brief_help_includes_positional_arguments_and_all_options(capsys):
     assert "key" in config_help
     assert "value" in config_help
     assert "--interactive" in config_help
-    assert "usage: pload cfg [-h] [-t] [{show,set}] [key] [value]" in config_help
+    assert "pload cfg [-h] [-t] [{show,set}] [key] [value]" in config_help
 
     assert main(["py", "install", "-h"]) == 0
     install_help = capsys.readouterr().out
     assert "version" in install_help
     assert "--home, -H" not in install_help
-    assert "usage: pload py install [-h] version" in install_help
+    assert "pload py install [-h] version" in install_help
 
 
 def test_brief_help_starts_with_highlighted_usage_for_aliases(capsys):
@@ -201,6 +201,7 @@ def test_brief_help_starts_with_highlighted_usage_for_aliases(capsys):
     output = capsys.readouterr().out
 
     assert "▶ USAGE" in output
+    assert "usage: pload cfg" not in output
     assert output.index("pload cfg") < output.index("▶ USAGE") < output.index("▶ Arguments")
 
 

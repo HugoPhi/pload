@@ -233,7 +233,7 @@ ordinary log lines.
 
 ## Help and aliases
 
-Brief help is a complete reference. It starts with a highlighted `usage:` line,
+Brief help is a complete reference. It starts with an emphasized `USAGE` panel,
 then lists every positional argument, long option, short alias, and description:
 
 ```console

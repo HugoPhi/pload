@@ -495,6 +495,32 @@ def render_help(argv):
         _brief_help(selected, command_path, root_parser=parser)
 
 
+def render_landing():
+    """Show the no-argument welcome screen and the smallest useful command tour."""
+    console = Console(highlight=False)
+    art = Text(
+        """   ____  _                 _
+  |  _ \\| | ___   __ _  __| |
+  | |_) | |/ _ \\ / _` |/ _` |
+  |  __/| | (_) | (_| | (_| |
+  |_|   |_|\\___/ \\__,_|\\__,_|""",
+        style="bold cyan",
+    )
+    console.print(art)
+    console.print(f"[bold white]pload {__version__}[/]  [dim]Python environments, kept simple.[/]")
+    console.print()
+    table = Table(title="Simple usage", box=box.SIMPLE, header_style="bold cyan", show_edge=False)
+    table.add_column("COMMAND", style="bold green", no_wrap=True)
+    table.add_column("WHAT IT DOES")
+    table.add_row("pload cfg", "Show where pload stores its data")
+    table.add_row("pload python list", "Find every usable Python interpreter")
+    table.add_row("pload new -n data -v 3.12", "Create a named virtual environment")
+    table.add_row("pload list", "List environments, IDs, and descriptions")
+    table.add_row("pload v1", "Activate an environment by ID")
+    console.print(table)
+    console.print("\n[dim]More help: [bold]pload -h[/bold]  ·  examples: [bold]pload -h -d[/bold][/dim]")
+
+
 def shell_script(shell):
     if shell in {"bash", "zsh"}:
         return r'''pload() {
@@ -541,6 +567,9 @@ end'''
 
 def run(argv=None):
     raw_args = list(sys.argv[1:] if argv is None else argv)
+    if not raw_args:
+        render_landing()
+        return 0
     if any(item in HELP_FLAGS for item in raw_args):
         render_help(raw_args)
         return 0

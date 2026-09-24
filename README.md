@@ -11,6 +11,10 @@ environments, state, and caches can all be placed in user-selected directories.
 
 pyenv is supported for compatibility, but is not required.
 
+After installation, running `pload` with no arguments opens a small welcome
+screen with the most useful commands. Use `pload -h` for the complete parameter
+reference or `pload -h -d` for examples and explanations.
+
 ## Recommended installation
 
 Install the small bootstrap package with pip, then run the guided installer:

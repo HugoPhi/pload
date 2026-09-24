@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.8 - 2026-09-24
+
+### Added
+
+- Running `pload` without arguments now opens a welcome screen with ASCII art,
+  simple usage examples, and links to concise and detailed help.
+
 ## 0.8.7 - 2026-09-24
 
 ### Added

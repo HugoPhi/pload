@@ -200,9 +200,10 @@ def test_brief_help_starts_with_highlighted_usage_for_aliases(capsys):
     assert main(["cfg", "-h"]) == 0
     output = capsys.readouterr().out
 
-    assert "▶ USAGE" in output
+    assert "USAGE" in output
+    assert "▶ USAGE" not in output
     assert "usage: pload cfg" not in output
-    assert output.index("pload cfg") < output.index("▶ USAGE") < output.index("▶ Arguments")
+    assert output.index("pload cfg") < output.index("USAGE") < output.index("▶ Arguments")
 
 
 def test_no_arguments_show_welcome_and_simple_usage(capsys):

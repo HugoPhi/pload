@@ -380,8 +380,6 @@ def _help_parser(parser, argv):
 
 def _global_options_table(root_parser):
     table = Table(
-        title="[bold cyan]▶ Global options[/]",
-        title_justify="left",
         box=box.SIMPLE,
         header_style="bold cyan",
         show_edge=False,
@@ -395,11 +393,21 @@ def _global_options_table(root_parser):
     return table
 
 
-def _print_emphasized_section(console, renderable):
-    """Give arrow-marked section titles consistent visual breathing room."""
+def _print_spaced_section(console, renderable):
+    """Give a standalone section consistent visual breathing room."""
     console.print()
     console.print()
     console.print(renderable)
+    console.print()
+
+
+def _print_arrow_table(console, title, table):
+    """Print a left-aligned arrow heading with readable space around its table."""
+    console.print()
+    console.print()
+    console.print(Text(f"▶ {title}", style="bold cyan"))
+    console.print()
+    console.print(table)
     console.print()
 
 
@@ -434,10 +442,10 @@ def _brief_help(parser, command_path, root_parser=None):
         title=f"[bold cyan]{title}[/]",
         border_style="blue",
     ))
-    _print_emphasized_section(console, Panel.fit(
+    _print_spaced_section(console, Panel.fit(
         usage_text,
-        title="[bold yellow]▶ USAGE[/]",
-        title_align="left",
+        title="[bold yellow]USAGE[/]",
+        title_align="center",
         border_style="yellow",
     ))
 
@@ -465,7 +473,7 @@ def _brief_help(parser, command_path, root_parser=None):
         console.print("  [green]pload new -n data -m \"Data analysis\"[/]")
         console.print("  [green]pload ls[/]")
         console.print("  [green]pload v1[/]  [dim]# activate after shell initialization[/]")
-        _print_emphasized_section(console, _global_options_table(root_parser or parser))
+        _print_arrow_table(console, "Global options", _global_options_table(root_parser or parser))
     else:
         choices = _subparser_choices(parser)
         if choices:
@@ -483,11 +491,7 @@ def _brief_help(parser, command_path, root_parser=None):
                 table.add_row(label, child.description or "See detailed help")
             console.print(table)
         else:
-            table = Table(
-                title="[bold cyan]▶ Arguments and options[/]", box=box.SIMPLE,
-                title_justify="left",
-                header_style="bold cyan", show_edge=False,
-            )
+            table = Table(box=box.SIMPLE, header_style="bold cyan", show_edge=False)
             table.add_column("ARGUMENT / OPTION", style="bold green", no_wrap=True)
             table.add_column("PURPOSE")
             for action in parser._actions:
@@ -497,7 +501,7 @@ def _brief_help(parser, command_path, root_parser=None):
                 if action.nargs in {"+", "*"}:
                     label += " ..."
                 table.add_row(label, action.help or "")
-            _print_emphasized_section(console, table)
+            _print_arrow_table(console, "Arguments and options", table)
 
     detail_command = " ".join(command_path)
     detail = f"pload {detail_command} -h -d" if detail_command else "pload -h -d"
@@ -532,13 +536,7 @@ def render_landing():
     )
     console.print(art)
     console.print(f"[bold white]pload {__version__}[/]  [dim]Python environments, kept simple.[/]")
-    table = Table(
-        title="[bold cyan]▶ Simple usage[/]",
-        title_justify="left",
-        box=box.SIMPLE,
-        header_style="bold cyan",
-        show_edge=False,
-    )
+    table = Table(box=box.SIMPLE, header_style="bold cyan", show_edge=False)
     table.add_column("COMMAND", style="bold green", no_wrap=True)
     table.add_column("WHAT IT DOES")
     table.add_row("pload cfg", "Show where pload stores its data")
@@ -547,8 +545,8 @@ def render_landing():
     table.add_row("pload new -n data -v 3.12", "Create a named virtual environment")
     table.add_row("pload list", "List environments, IDs, and descriptions")
     table.add_row("pload v1", "Activate an environment by ID")
-    _print_emphasized_section(console, table)
-    _print_emphasized_section(console, _global_options_table(build_parser()))
+    _print_arrow_table(console, "Simple usage", table)
+    _print_arrow_table(console, "Global options", _global_options_table(build_parser()))
     console.print("[dim]More help: [bold]pload -h[/bold]  ·  examples: [bold]pload -h -d[/bold][/dim]")
 
 

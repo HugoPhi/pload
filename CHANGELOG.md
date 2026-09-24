@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.6 - 2026-09-24
+
+### Changed
+
+- Keep `USAGE` centered without an arrow marker.
+- Render arrow-marked section headings as standalone left-aligned lines, with
+  a blank line between each heading and its table for easier scanning.
+
 ## 0.9.5 - 2026-09-24
 
 ### Changed

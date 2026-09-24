@@ -18,10 +18,17 @@ from urllib.parse import urlsplit, urlunsplit
 
 from pload.errors import PloadError
 from pload.managers.venv import VenvManager
+from pload.reproduction import (
+    ReproductionPlanner,
+    normalized_name,
+    parse_package_source,
+    safe_source,
+    wheel_identity,
+)
 from pload.settings import save_settings
 
 PROBE = """
-import json, platform, sys, os
+import json, platform, sys, os, shutil, subprocess
 from importlib import metadata
 packages = []
 for dist in metadata.distributions():
@@ -29,10 +36,26 @@ for dist in metadata.distributions():
     if name and name.lower() not in ('pip', 'setuptools', 'wheel'):
         packages.append({'name': name, 'version': dist.version,
                          'direct_url': dist.read_text('direct_url.json')})
+accelerators = []
+nvidia_smi = shutil.which('nvidia-smi')
+if nvidia_smi:
+    try:
+        result = subprocess.run([nvidia_smi, '--query-gpu=driver_version',
+                                 '--format=csv,noheader'], capture_output=True, text=True,
+                                timeout=5)
+        if result.returncode == 0:
+            versions = sorted(set(line.strip() for line in result.stdout.splitlines()
+                                  if line.strip()))
+            accelerators.append({'kind': 'nvidia', 'driver_versions': versions,
+                                 'note': 'recorded compatibility context; '
+                                         'pload does not install drivers'})
+    except (OSError, subprocess.SubprocessError):
+        pass
 print(json.dumps({'python': platform.python_version(),
  'implementation': sys.implementation.name, 'system': platform.system(),
  'machine': platform.machine(), 'libc': list(platform.libc_ver()),
- 'conda': os.path.isdir(os.path.join(sys.prefix, 'conda-meta')), 'packages': packages}))
+ 'conda': os.path.isdir(os.path.join(sys.prefix, 'conda-meta')),
+ 'accelerators': accelerators, 'packages': packages}))
 """
 
 
@@ -124,7 +147,10 @@ class SnapshotManager:
             raise PloadError("'objects' is reserved for repository wheel storage")
         return self.root / safe_name(name)
 
-    def export(self, name, environment=None, python=None, bundle=None, index=None, links=None):
+    def export(
+        self, name, environment=None, python=None, bundle=None, index=None, links=None,
+        sources=None,
+    ):
         target = self.path(name)
         if target.exists():
             raise PloadError(f"snapshot already exists: {name}; choose a new name")
@@ -140,7 +166,15 @@ class SnapshotManager:
             raise PloadError("Conda environments contain native dependencies that pip cannot reproduce; "
                              "use conda export for the full environment, or export a pip requirements "
                              "file explicitly and pass it to pload restore")
+        try:
+            package_sources = {}
+            for item in sources or []:
+                package_name, package_source = parse_package_source(item)
+                package_sources.setdefault(package_name, []).append(package_source)
+        except ValueError as exc:
+            raise PloadError(str(exc)) from exc
         pins = []
+        package_records = []
         exact_wheels = {}
         for package in sorted(runtime.pop("packages"), key=lambda p: p["name"].lower()):
             pin = f"{package['name']}=={package['version']}"
@@ -173,6 +207,29 @@ class SnapshotManager:
             if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*==[A-Za-z0-9][A-Za-z0-9_.+!-]*", pin):
                 raise PloadError(f"invalid installed package metadata: {pin!r}")
             pins.append(pin)
+            normalized = normalized_name(package["name"])
+            source_urls = []
+            for package_source in package_sources.get(normalized, []):
+                public_source = {
+                    "kind": package_source["kind"],
+                    "url": (safe_source(package_source["url"])
+                            if package_source["kind"] == "source"
+                            else public_index(package_source["url"])),
+                }
+                if public_source not in source_urls:
+                    source_urls.append(public_source)
+            default_index = public_index(index or self.config.settings.get("pip_index"))
+            default_source = {"kind": "index", "url": default_index}
+            if default_index and default_source not in source_urls:
+                source_urls.append(default_source)
+            package_records.append({
+                "name": package["name"],
+                "version": package["version"],
+                "normalized_name": normalized,
+                "installed_from": "direct-wheel" if package["direct_url"] else "index-or-cache",
+                "sources": source_urls,
+                "artifacts": [],
+            })
         self.root.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix=".export-", dir=str(self.root)) as temporary:
             stage = Path(temporary) / name
@@ -192,22 +249,57 @@ class SnapshotManager:
                 wheel_dir = stage / "wheels"
                 wheel_dir.mkdir()
                 self.wheels.mkdir(parents=True, exist_ok=True)
-                if download:
-                    download = [exact_wheels.get(pin, pin) for pin in download]
-                    command = [str(interpreter), "-m", "pip", "download", "--only-binary=:all:",
-                               "--no-deps", "--dest", str(wheel_dir),
-                               "--find-links", str(self.wheels)]
+                for pin in download:
+                    request = exact_wheels.get(pin, pin)
+                    command = [
+                        str(interpreter), "-m", "pip", "download", "--only-binary=:all:",
+                        "--no-deps", "--dest", str(wheel_dir),
+                        "--find-links", str(self.wheels),
+                    ]
                     for link in links or []:
                         command.extend(["--find-links", str(Path(link).expanduser().resolve())])
-                    # First try without networking; fall back to pip's normal HTTP/wheel cache.
+                    # First try local wheel stores, then package-specific indexes,
+                    # then the general configured index. This prevents a special
+                    # CUDA build from silently being replaced by the default build.
                     try:
-                        execute(command + ["--no-index"] + download)
-                    except PloadError:
-                        if index or self.config.settings.get("pip_index"):
-                            command += ["--index-url", index or self.config.settings["pip_index"]]
-                        execute(command + download, capture=False)
+                        execute(command + ["--no-index", request])
+                        continue
+                    except PloadError as local_error:
+                        last_error = local_error
+                    package_name = normalized_name(pin.split("==", 1)[0])
+                    indexes = [
+                        source["url"] for source in package_sources.get(package_name, [])
+                        if source["kind"] == "index"
+                    ]
+                    general_index = index or self.config.settings.get("pip_index")
+                    if general_index:
+                        indexes.append(general_index)
+                    # An empty list means pip's configured/default index.
+                    attempts = list(dict.fromkeys(indexes)) or [None]
+                    for package_index in attempts:
+                        online = list(command)
+                        if package_index:
+                            online += ["--index-url", package_index]
+                        try:
+                            execute(online + [request])
+                            break
+                        except PloadError as exc:
+                            last_error = exc
+                    else:
+                        raise PloadError(f"cannot archive {pin}: {last_error}")
                 for wheel in sorted(wheel_dir.glob("*.whl")):
-                    files["wheels/" + wheel.name] = digest(wheel)
+                    relative = "wheels/" + wheel.name
+                    checksum = digest(wheel)
+                    files[relative] = checksum
+                    wheel_package = normalized_name(wheel.name.split("-", 1)[0])
+                    for record in package_records:
+                        if record["normalized_name"] == wheel_package:
+                            record["artifacts"].append({
+                                "file": relative,
+                                "sha256": checksum,
+                                "kind": "wheel",
+                            })
+                            break
                     cached = self.wheels / wheel.name
                     if cached.exists() and digest(cached) != digest(wheel):
                         raise PloadError(f"different wheel with same filename in cache: {wheel.name}")
@@ -217,12 +309,45 @@ class SnapshotManager:
                 "schema": 1, "name": name, "runtime": runtime, "files": files,
                 "bundle": bundle or "none",
                 "index_url": public_index(index or self.config.settings.get("pip_index")),
+                "packages": package_records,
             })
             validate_bundle(stage)
             stage.rename(target)
         return target
 
-    def restore(self, source, name, version=None, offline=False, portable=False, index=None):
+    def plan(self, source, offline=False, portable=False, index=None, links=None, sources=None):
+        candidate = Path(source).expanduser()
+        path = candidate if candidate.exists() else self.path(source)
+        data = validate_bundle(path)
+        if not data.get("packages"):
+            data["packages"] = []
+            for pin in (path / "requirements.txt").read_text(encoding="utf-8").splitlines():
+                name, version = pin.split("==", 1)
+                artifacts = []
+                for filename, checksum in data["files"].items():
+                    wheel_name, wheel_version = wheel_identity(filename)
+                    if wheel_name == normalized_name(name) and wheel_version == version:
+                        artifacts.append({
+                            "file": filename, "sha256": checksum, "kind": "wheel",
+                        })
+                data["packages"].append({
+                    "name": name, "version": version,
+                    "normalized_name": normalized_name(name),
+                    "installed_from": "legacy-snapshot",
+                    "sources": ([{"kind": "index", "url": data.get("index_url")}]
+                                if data.get("index_url") else []),
+                    "artifacts": artifacts,
+                })
+        planner = ReproductionPlanner(path, data, self.wheels, links)
+        try:
+            return planner.plan(offline=offline, portable=portable, index=index, sources=sources)
+        except ValueError as exc:
+            raise PloadError(str(exc)) from exc
+
+    def restore(
+        self, source, name, version=None, offline=False, portable=False, index=None,
+        links=None, sources=None, strategy="planned",
+    ):
         candidate = Path(source).expanduser()
         path = candidate if candidate.exists() else self.path(source)
         is_recipe = path.is_file()
@@ -248,6 +373,11 @@ class SnapshotManager:
         requirements = path if is_recipe else path / "requirements.txt"
         self.root.mkdir(parents=True, exist_ok=True)
         env = VenvManager(self.config).create_venv(version=str(interpreter), name=name)
+        if data and strategy == "planned":
+            plans = self.plan(path, offline, portable, index, links, sources)
+            self._execute_plan(env, requirements, plans)
+            execute(self.config.get_pip_command(env) + ["check"], capture=False)
+            return env
         command = self.config.get_pip_command(env) + ["install", "-r", str(requirements.resolve())]
         if data and not portable:
             # Only checksum-verified artifacts may be used from a snapshot.
@@ -272,6 +402,58 @@ class SnapshotManager:
             self._install(command, offline, index)
         execute(self.config.get_pip_command(env) + ["check"], capture=False)
         return env
+
+    def _execute_plan(self, env, requirements, plans):
+        pip = self.config.get_pip_command(env)
+        for package in plans:
+            candidates = ([package["selected"]] if package["selected"] else []) + package["alternatives"]
+            failures = []
+            installed = False
+            for item in candidates:
+                command = pip + ["install", "--no-deps"]
+                method = item["method"]
+                if item["availability"] == "ready":
+                    artifact = Path(item["location"])
+                    checksum = item.get("artifact", {}).get("sha256") or digest(artifact)
+                    if digest(artifact) != checksum:
+                        failures.append(f"{method}: checksum mismatch")
+                        continue
+                    command += [artifact.resolve().as_uri() + "#sha256=" + checksum]
+                elif method in {"package-index", "requested-index", "recorded-index"}:
+                    command += ["--only-binary=:all:", "--index-url", item["location"],
+                                f"{package['name']}=={package['version']}"]
+                elif method == "source-build":
+                    command += ["--no-binary=:all:", "--index-url", item["location"],
+                                f"{package['name']}=={package['version']}"]
+                elif method == "source-repository":
+                    command += [item["location"]]
+                elif method == "pip-default-index":
+                    command += ["--only-binary=:all:",
+                                f"{package['name']}=={package['version']}"]
+                elif method == "pip-default-source-build":
+                    command += ["--no-binary=:all:",
+                                f"{package['name']}=={package['version']}"]
+                else:
+                    failures.append(f"{method}: unsupported method")
+                    continue
+                try:
+                    execute(command)
+                except PloadError as exc:
+                    failures.append(f"{method}: {exc}")
+                    continue
+                print(f"[*] {package['name']}=={package['version']}: {method}")
+                installed = True
+                break
+            if not installed:
+                methods = ", ".join(item["method"] for item in candidates) or "none"
+                detail = failures[-1] if failures else "no compatible candidate"
+                raise PloadError(
+                    f"cannot reproduce {package['name']}=={package['version']}; "
+                    f"tried {methods}; last result: {detail}"
+                )
+        # Confirm every requested version is present without contacting an index.
+        execute(pip + ["install", "--no-index", "--no-deps", "-r",
+                       str(Path(requirements).resolve())])
 
     def _install(self, command, offline, index):
         if self.wheels.is_dir():

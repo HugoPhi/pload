@@ -11,6 +11,11 @@
 - Configure local, SSH and Git recipe repositories; push and pull immutable snapshots.
 - Reuse local wheel archives and pip caches, deduplicate SSH wheel storage by SHA-256,
   and avoid re-downloading identical cached wheels during pull.
+- Record per-package sources and artifact identities, then use `pload plan` to rank
+  checked snapshot wheels, shared caches, supplied wheel directories, special/general
+  indexes and source builds with visible fallbacks.
+- Record NVIDIA driver versions as compatibility context while keeping driver
+  installation outside pload's package-management scope.
 - Document interoperability boundaries, GPU/native dependencies, source-wheel
   provenance and repository trust requirements.
 

@@ -338,6 +338,8 @@ GUIDES[("export",)] = r"""
 pload export analysis-01 -e v1
 pload export analysis-offline -p /path/to/project/.venv/bin/python -b all
 pload export training-01 -e v2 -b torch -f /mnt/downloaded-wheels
+pload export training-cu121 -e v2 -b torch \
+  -s torch=https://download.pytorch.org/whl/cu121
 ```
 
 The first command records exact installed versions and interpreter/platform metadata
@@ -345,6 +347,7 @@ under `PLOAD_HOME/snapshots/analysis-01`. Its requirements.txt also works with p
 and uv. The second adds every package's wheel for offline restoration. The third
 archives only torch, so other packages still come from your package index.
 Use `-i URL` to select a dedicated wheel index, such as your PyTorch CUDA index.
+Use repeatable `-s PACKAGE=URL` values when special packages have different sources.
 Existing shared wheels are tried offline first; then pip uses its normal caches.
 
 Names are immutable: export a new name for a new revision. Source checkouts and
@@ -359,6 +362,8 @@ GUIDES[("restore",)] = r"""
 ```console
 pload restore analysis-offline -n analysis-copy -o
 pload restore analysis-01 -n linux-copy -p
+pload restore training -n training-copy \
+  -s torch=https://download.pytorch.org/whl/cu121
 pload restore ./requirements.txt -n imported -v 3.12
 ```
 
@@ -370,9 +375,40 @@ a promise of an identical environment and cannot be combined with offline mode.
 Only import requirements files and repositories you trust: installing packages
 can execute code. Exported index provenance is informational; choose the restore
 index explicitly with `-i URL` when your configured index cannot supply a package.
+The default `planned` strategy tries the highest-ranked method and automatically
+falls back through the alternatives shown by `pload plan -a`. Use `-g pip` to
+delegate the whole requirements file to pip's ordinary resolver.
 
 The target name must be unused. A failed install leaves that new environment for
 inspection or removal with `pload rm`. Existing environments are never updated.
+"""
+GUIDES[("plan",)] = r"""
+# Explain how every package can be reproduced
+
+```console
+pload plan training-cu121
+pload plan training-cu121 -a
+pload plan training-cu121 -o
+pload plan training-cu121 -p -s torch=https://download.pytorch.org/whl/cu124
+pload plan custom -s custom=source:https://github.com/example/custom.git
+pload plan training-cu121 -j
+```
+
+The selected method maximizes exactness and compatibility, then minimizes network
+transfer and build work. The order is: checked snapshot wheel, shared wheel cache,
+`--find-links`, package-specific index, requested/general index, then source build.
+If no index provenance exists, pip's configured/default index remains a lower-ranked
+online fallback.
+`-a` prints ranked fallbacks. `-o` permits ready local artifacts only. `-p` skips
+platform-specific wheel artifacts so fixed versions can be resolved for a different
+platform. JSON output is suitable for scripts.
+Repeat `-s` for alternate sources. `PACKAGE=URL` is an index; use
+`PACKAGE=source:URL` for an upstream repository/archive that requires a build.
+
+Online candidates are provisional: planning does not download large files merely to
+probe availability. pip performs the final wheel-tag/build check during restoration.
+The planner chooses package files; it does not install CUDA/GPU drivers or system
+libraries. Driver versions are recorded as compatibility context when available.
 """
 GUIDES[("repo",)] = r"""
 # Store recipes and reusable wheels on your own infrastructure

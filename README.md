@@ -77,8 +77,13 @@ profile when `--shell` is supplied or already configured.
 
 ## Reproduce and share environments
 
-The next-version implementation on `feature/reproducible-environments` adds
-`export`, `restore` and `repo`. These commands are not in the published 1.0.0.
+This feature combines environment recipes, checked wheel backups, cache reuse,
+remote repositories and an explainable per-package reproduction planner. See the
+full [reproducibility and artifact reuse guide](docs/reproducibility.md) for the
+guarantee levels, selection algorithm, CUDA-package example and current boundaries.
+
+The next-version experiment on `experiment/reproduction-planner` adds
+`export`, `plan`, `restore` and `repo`. These commands are not in the published 1.0.0.
 Install this checkout into a separate development environment to try them:
 
 ```console

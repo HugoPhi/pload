@@ -30,6 +30,7 @@ COMMAND_ALIASES = {
     "config": ("cfg",),
     "export": (),
     "restore": (),
+    "plan": (),
     "repo": (),
 }
 PYTHON_ALIASES = {
@@ -290,6 +291,10 @@ Aliases: system=sys, managed=uv""",
     export.add_argument("--bundle", "-b", help="all or comma-separated packages to archive as wheels")
     export.add_argument("--index-url", "-i", help="index used to download wheels, e.g. PyTorch CUDA")
     export.add_argument("--find-links", "-f", action="append", help="existing wheel directory; repeatable")
+    export.add_argument(
+        "--source", "-s", action="append", default=[], metavar="PACKAGE=URL",
+        help="record a package-specific download/build source; repeatable",
+    )
     restore = subparsers.add_parser(
         "restore", description="Create a new environment from a snapshot or trusted requirements file.",
         help="restore a snapshot or requirements.txt",
@@ -301,6 +306,28 @@ Aliases: system=sys, managed=uv""",
     restore.add_argument("--portable", "-p", action="store_true",
                          help="resolve pins for another platform; ignore bundled wheels")
     restore.add_argument("--index-url", "-i", help="package index for online restoration")
+    restore.add_argument("--find-links", "-f", action="append", help="wheel directory; repeatable")
+    restore.add_argument("--source", "-s", dest="package_sources", action="append", default=[],
+                         metavar="PACKAGE=URL",
+                         help="package-specific index or source:URL fallback; repeatable")
+    restore.add_argument("--strategy", "-g", choices=["planned", "pip"], default="planned",
+                         help="planned per-package fallback or pip's resolver (default: planned)")
+    plan = subparsers.add_parser(
+        "plan", description="Rank available reproduction methods for every package.",
+        help="explain the best reproduction method per package",
+    )
+    plan.add_argument("snapshot", help="snapshot name or directory")
+    plan.add_argument("--offline", "-o", action="store_true", help="show local methods only")
+    plan.add_argument("--portable", "-p", action="store_true",
+                      help="plan for another platform; skip platform-specific bundled wheels")
+    plan.add_argument("--index-url", "-i", help="general package index candidate")
+    plan.add_argument("--find-links", "-f", action="append", help="wheel directory; repeatable")
+    plan.add_argument("--source", "-s", dest="package_sources", action="append", default=[],
+                      metavar="PACKAGE=URL",
+                      help="package-specific source candidate; repeatable")
+    plan.add_argument("--alternatives", "-a", action="store_true",
+                      help="show ranked fallback methods in addition to the selected method")
+    plan.add_argument("--json", "-j", action="store_true", help="emit machine-readable JSON")
     repo = subparsers.add_parser("repo", help="manage snapshot repositories",
                                  description="Manage local, SSH and Git snapshot repositories.")
     actions = repo.add_subparsers(dest="repo_command", required=True)
@@ -433,6 +460,33 @@ def _global_options_table(root_parser):
     return table
 
 
+def print_reproduction_plan(plans, alternatives=False):
+    table = Table(box=box.ROUNDED, header_style="bold cyan", border_style="blue")
+    table.add_column("PACKAGE", style="bold green", no_wrap=True)
+    table.add_column("VERSION", style="yellow", no_wrap=True)
+    table.add_column("METHOD", style="bold cyan", no_wrap=True)
+    table.add_column("STATUS", no_wrap=True)
+    table.add_column("LOCATION / REASON")
+    for package in plans:
+        selected = package["selected"]
+        if selected:
+            table.add_row(
+                package["name"], package["version"], selected["method"],
+                selected["availability"],
+                f"{selected['location']}\n[dim]{selected['reason']}[/dim]",
+            )
+        else:
+            table.add_row(package["name"], package["version"], "—", "unavailable",
+                          "No candidate satisfies the requested constraints")
+        if alternatives:
+            for fallback in package["alternatives"]:
+                table.add_row(
+                    "  ↳ fallback", "", fallback["method"], fallback["availability"],
+                    f"{fallback['location']}\n[dim]{fallback['reason']}[/dim]",
+                )
+    Console(highlight=False).print(table)
+
+
 def _print_spaced_section(console, renderable):
     """Give a standalone section consistent visual breathing room."""
     console.print()
@@ -505,6 +559,7 @@ def _brief_help(parser, command_path, root_parser=None):
             "shell-init": "Print shell activation integration",
             "export": "Save a package snapshot and optional wheels",
             "restore": "Recreate a snapshot or requirements file",
+            "plan": "Explain the best reproduction method per package",
             "repo": "Manage local, SSH and Git repositories",
         }
         for command, summary in summaries.items():
@@ -597,7 +652,7 @@ def shell_script(shell):
     if shell in {"bash", "zsh"}:
         return r'''pload() {
     case "${1:-}" in
-        ""|new|init|i|rm|remove|del|delete|list|ls|path|p|shell-init|shell|python|py|config|cfg|export|restore|repo|-*)
+        ""|new|init|i|rm|remove|del|delete|list|ls|path|p|shell-init|shell|python|py|config|cfg|export|restore|plan|repo|-*)
             command pload "$@"
             ;;
         *)
@@ -610,7 +665,7 @@ def shell_script(shell):
     if shell == "fish":
         return r'''function pload
     switch "$argv[1]"
-        case '' new init i rm remove del delete list ls path p shell-init shell python py config cfg export restore repo '-*'
+        case '' new init i rm remove del delete list ls path p shell-init shell python py config cfg export restore plan repo '-*'
             command pload $argv
         case '*'
             set -l name .
@@ -624,7 +679,7 @@ def shell_script(shell):
 end'''
     return r'''function pload {
     param([Parameter(ValueFromRemainingArguments = $true)][string[]]$PloadArgs)
-    $commands = @('new', 'init', 'i', 'rm', 'remove', 'del', 'delete', 'list', 'ls', 'path', 'p', 'shell-init', 'shell', 'python', 'py', 'config', 'cfg', 'export', 'restore', 'repo', '-h', '--help', '--version')
+    $commands = @('new', 'init', 'i', 'rm', 'remove', 'del', 'delete', 'list', 'ls', 'path', 'p', 'shell-init', 'shell', 'python', 'py', 'config', 'cfg', 'export', 'restore', 'plan', 'repo', '-h', '--help', '--version')
     $backend = Get-Command -Name @('pload.exe', 'pload.cmd') -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $backend) { throw 'pload executable not found on PATH' }
     if ($PloadArgs.Count -eq 0) {
@@ -690,16 +745,24 @@ def run(argv=None):
     venvs = VenvManager(config)
     dependencies = DependencyManager(config)
 
-    if command in {"export", "restore", "repo"}:
+    if command in {"export", "restore", "plan", "repo"}:
         from pload.snapshots import RepositoryManager, SnapshotManager
 
         snapshots = SnapshotManager(config)
         if command == "export":
             print(snapshots.export(args.name, args.environment, args.python, args.bundle,
-                                   args.index_url, args.find_links))
+                                   args.index_url, args.find_links, args.source))
         elif command == "restore":
             print(snapshots.restore(args.source, args.name, args.version,
-                                    args.offline, args.portable, args.index_url))
+                                    args.offline, args.portable, args.index_url,
+                                    args.find_links, args.package_sources, args.strategy))
+        elif command == "plan":
+            plans = snapshots.plan(args.snapshot, args.offline, args.portable, args.index_url,
+                                   args.find_links, args.package_sources)
+            if args.json:
+                print(json.dumps(plans, ensure_ascii=False, indent=2))
+            else:
+                print_reproduction_plan(plans, args.alternatives)
         else:
             repositories = RepositoryManager(config)
             if args.repo_command == "add":

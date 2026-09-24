@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.1 - 2026-09-24
+
+### Changed
+
+- Remove the legacy `--message/-m` name-suffix option.
+- Use `--message/-d` as the single description option; `--description` is no
+  longer accepted.
+- Generate simple unique names such as `python-3.12`, `python-3.12-2` when
+  `--name` is omitted.
+- Display Python runtime IDs and aliases in separate columns.
+
 ## 0.9.0 - 2026-09-24
 
 ### Added

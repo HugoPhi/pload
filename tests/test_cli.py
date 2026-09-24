@@ -1,3 +1,5 @@
+import pytest
+
 from pload.cli import build_parser, main, shell_script
 
 
@@ -113,9 +115,16 @@ def test_simple_commands_have_no_alias_but_long_options_have_short_forms():
 
 
 def test_description_short_option_does_not_conflict_with_detailed_help():
-    args = build_parser().parse_args(["new", "-d", "Data tools"])
+    args = build_parser().parse_args(["new", "--message", "Data tools"])
 
     assert args.description == "Data tools"
+
+
+def test_message_is_the_only_long_description_option():
+    parser = build_parser()
+    assert parser.parse_args(["new", "--message", "Data tools"]).description == "Data tools"
+    with pytest.raises(SystemExit):
+        parser.parse_args(["new", "--description", "Data tools"])
 
 
 def test_brief_and_detailed_help_are_distinct(capsys):

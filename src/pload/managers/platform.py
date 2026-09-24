@@ -210,7 +210,6 @@ class ConfigManager:
     def resolve_venv_path(
         self,
         version=None,
-        message="normal",
         is_local=False,
         project_dir=None,
         target=None,
@@ -227,7 +226,17 @@ class ConfigManager:
         if is_local:
             return project / ".venv", ".venv"
 
-        env_name = name or f"{version or 'current'}-{message.replace(' ', '_')}"
+        if name:
+            env_name = name
+        else:
+            requested = str(version or "current")
+            requested = re.sub(r"[^A-Za-z0-9_.-]+", "-", requested).strip("-._")
+            base = f"python-{requested or 'current'}"
+            env_name = base
+            suffix = 2
+            while (self.venv_path / env_name).exists():
+                env_name = f"{base}-{suffix}"
+                suffix += 1
         valid, error = self.validate_env_name(env_name)
         if not valid:
             raise ValueError(f"invalid environment name {env_name!r}: {error}")

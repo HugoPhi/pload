@@ -158,9 +158,9 @@ pload python path 3.12
 Each distinct executable receives a stable Python ID and readable alias:
 
 ```text
-ID / ALIAS            VERSION  TYPE    PATH
-py1:uv-v3.12.8        3.12.8   uv      ~/.pload/pythons/.../python3.12
-py2:conda-v3.11.9     3.11.9   conda   ~/miniforge3/envs/data/bin/python
+ID   ALIAS          VERSION  TYPE    PATH
+py1  uv-v3.12.8     3.12.8   uv      ~/.pload/pythons/.../python3.12
+py2  conda-v3.11.9  3.11.9   conda   ~/miniforge3/envs/data/bin/python
 ```
 
 Use any of these forms when selecting an interpreter:
@@ -200,6 +200,7 @@ Create a named environment with a description:
 ```console
 pload new -n data -v 3.12 -d "Data analysis"
 pload new -n web -v 3.12 -r fastapi uvicorn -d "Web API"
+pload new -v 3.12 --message "Temporary data tools"  # auto-named safely
 pload list
 pload v1
 ```

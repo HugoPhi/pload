@@ -18,6 +18,17 @@ def test_explicit_paths_are_fully_isolated(tmp_path):
     assert config.state_path == (tmp_path / "state").resolve()
 
 
+def test_unnamed_environment_names_are_simple_and_unique(tmp_path):
+    config = ConfigManager(home=tmp_path / "home", venvs_dir=tmp_path / "venvs")
+    first_path, first_name = config.resolve_venv_path(version="3.12")
+    first_path.mkdir(parents=True)
+    second_path, second_name = config.resolve_venv_path(version="3.12")
+
+    assert first_name == "python-3.12"
+    assert second_name == "python-3.12-2"
+    assert first_path != second_path
+
+
 def test_environment_configuration(monkeypatch, tmp_path):
     monkeypatch.setenv("PLOAD_HOME", str(tmp_path / "portable"))
     config = ConfigManager()

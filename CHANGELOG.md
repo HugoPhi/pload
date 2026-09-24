@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.1 - 2026-09-24
+
+### Changed
+
+- Replace formal `-h -d` argument summaries with task-oriented guides that
+  include copyable examples, expected output, on-disk effects, failure
+  behavior, and safety notes for every command.
+- Expand `pload-install -h -d` into a walkthrough of the numbered prompts,
+  resulting directory layout, shell changes, and non-interactive setup.
+
 ## 0.8.0 - 2026-09-24
 
 ### Added

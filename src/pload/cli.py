@@ -9,11 +9,11 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
-from rich_argparse import RawDescriptionRichHelpFormatter
 
 from pload import __version__
 from pload.display import print_environment_table, print_python_table
 from pload.errors import PloadError
+from pload.help_content import render_detailed_help
 from pload.managers.dependency import DependencyManager
 from pload.managers.platform import ConfigManager, PythonNotFoundError
 from pload.managers.pyversion import PythonManager
@@ -48,11 +48,6 @@ HELP_FLAGS = {"-h", "--help"}
 DETAIL_FLAGS = {"-d", "--detailed", "--details"}
 
 
-RawDescriptionRichHelpFormatter.styles["argparse.groups"] = "bold cyan"
-RawDescriptionRichHelpFormatter.styles["argparse.args"] = "bold green"
-RawDescriptionRichHelpFormatter.styles["argparse.metavar"] = "bold yellow"
-
-
 def build_parser():
     parser = argparse.ArgumentParser(
         prog="pload",
@@ -60,7 +55,7 @@ def build_parser():
             "Create, activate, and remove Python virtual environments without tying "
             "pload itself to any project environment."
         ),
-        formatter_class=RawDescriptionRichHelpFormatter,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Typical workflow:
   pload python install 3.12        Download a managed Python when needed
   pload new --name data -v 3.12 -d "Data analysis"
@@ -88,14 +83,20 @@ Run `pload <command> -h -d` for complete command-specific examples.""",
             "Create a virtual environment under the configured managed root, or at an "
             "explicit --path. The current Python is used when --version is omitted."
         ),
-        formatter_class=RawDescriptionRichHelpFormatter,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
   pload new --name tools
   pload new --name data --version 3.12 -d "Data analysis" -r numpy pandas
   pload new --path /mnt/venvs/build --version /opt/python/bin/python""",
     )
-    new.add_argument("--version", "-v", dest="python_version")
-    new.add_argument("--message", "-m", default="normal")
+    new.add_argument(
+        "--version", "-v", dest="python_version",
+        help="Python version request or exact interpreter path",
+    )
+    new.add_argument(
+        "--message", "-m", default="normal",
+        help="legacy suffix used only when --name is omitted",
+    )
     new.add_argument("--name", help="exact environment name")
     new.add_argument("--path", help="exact destination instead of the managed root")
     new.add_argument("--description", "-d", help="human-readable purpose shown by pload list")
@@ -107,13 +108,16 @@ Run `pload <command> -h -d` for complete command-specific examples.""",
             "Create a project environment. A relative --venv-dir is resolved against "
             "--project-dir, so the command behaves consistently from any directory."
         ),
-        formatter_class=RawDescriptionRichHelpFormatter,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
   pload init
   pload init --project-dir ./service --venv-dir .runtime/python -d "Service tools"
   pload init --project-dir /srv/app --venv-dir /mnt/venvs/app -v 3.12""",
     )
-    init.add_argument("--version", "-v", dest="python_version")
+    init.add_argument(
+        "--version", "-v", dest="python_version",
+        help="Python version request or exact interpreter path",
+    )
     init.add_argument("--project-dir", default=".", help="project directory (default: current)")
     init.add_argument(
         "--venv-dir", default=".venv",
@@ -128,7 +132,7 @@ Run `pload <command> -h -d` for complete command-specific examples.""",
             "Remove environments by stable ID or name, or select managed environments with a regular "
             "expression. Active environments and symbolic links are never removed."
         ),
-        formatter_class=RawDescriptionRichHelpFormatter,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
   pload rm v1
   pload rm data
@@ -136,11 +140,23 @@ Run `pload <command> -h -d` for complete command-specific examples.""",
   pload rm --expression '^temporary-' --yes
   pload rm . --project-dir /srv/app""",
     )
-    remove.add_argument("names", nargs="*")
-    remove.add_argument("--envs", "-n", nargs="+", default=[])
-    remove.add_argument("--expression", "-e", "-re")
-    remove.add_argument("--project-dir", default=".")
-    remove.add_argument("--yes", "-y", action="store_true")
+    remove.add_argument("names", nargs="*", help="environment IDs or names")
+    remove.add_argument(
+        "--envs", "-n", nargs="+", default=[],
+        help="additional environment IDs or names",
+    )
+    remove.add_argument(
+        "--expression", "-e", "-re",
+        help="select managed environment names with a regular expression",
+    )
+    remove.add_argument(
+        "--project-dir", default=".",
+        help="project containing .venv when removing '.'",
+    )
+    remove.add_argument(
+        "--yes", "-y", action="store_true",
+        help="skip the typed-name confirmation",
+    )
 
     listing = subparsers.add_parser(
         "list", aliases=COMMAND_ALIASES["list"], help="list managed environments",
@@ -148,29 +164,43 @@ Run `pload <command> -h -d` for complete command-specific examples.""",
             "List registered environments in a readable table. Legacy environments under "
             "the managed root are assigned stable IDs automatically."
         ),
-        formatter_class=RawDescriptionRichHelpFormatter,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
   pload list
   pload list --expression '^(v1|data)$'
   pload list --expression '^3\\.12-'
   pload list --python-versions""",
     )
-    listing.add_argument("--expression", "-e", "-re", default=".*")
-    listing.add_argument("--python-versions", "--version", "-v", action="store_true")
+    listing.add_argument(
+        "--expression", "-e", "-re", default=".*",
+        help="filter environment IDs or names with a regular expression",
+    )
+    listing.add_argument(
+        "--python-versions", "--version", "-v", action="store_true",
+        help="show managed Python versions instead of environments",
+    )
 
     path = subparsers.add_parser(
         "path", aliases=COMMAND_ALIASES["path"],
         help="print an environment or activation path by ID, name, or path",
     )
-    path.add_argument("name")
-    path.add_argument("--project-dir", default=".")
-    path.add_argument("--shell", choices=["bash", "zsh", "fish", "powershell"])
+    path.add_argument("name", help="environment ID, name, '.', or explicit path")
+    path.add_argument(
+        "--project-dir", default=".", help="project directory used when name is '.'"
+    )
+    path.add_argument(
+        "--shell", choices=["bash", "zsh", "fish", "powershell"],
+        help="print this shell's activation script instead of the environment root",
+    )
 
     shell_init = subparsers.add_parser(
         "shell-init", aliases=COMMAND_ALIASES["shell-init"],
         help="print shell integration; evaluate it from your profile",
     )
-    shell_init.add_argument("shell", choices=["bash", "zsh", "fish", "powershell"])
+    shell_init.add_argument(
+        "shell", choices=["bash", "zsh", "fish", "powershell"],
+        help="shell syntax to generate",
+    )
 
     python = subparsers.add_parser(
         "python", aliases=COMMAND_ALIASES["python"],
@@ -179,7 +209,7 @@ Run `pload <command> -h -d` for complete command-specific examples.""",
             "Manage isolated Python runtimes through uv. Downloads are stored under "
             "PLOAD_HOME by default and respect the mirror selected by pload-install."
         ),
-        formatter_class=RawDescriptionRichHelpFormatter,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
   pload python install 3.12
   pload python install 3.12.8
@@ -206,7 +236,7 @@ Run `pload config show` to inspect the download source and install directory."""
             "Discover usable Python 3 interpreters and show their version, source type, "
             "and resolved executable path."
         ),
-        formatter_class=RawDescriptionRichHelpFormatter,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
   pload python list
   pload python list --filter uv,conda
@@ -227,13 +257,16 @@ Aliases: system=sys, managed=uv""",
         "path", aliases=PYTHON_ALIASES["path"],
         help="resolve an installed interpreter",
     )
-    python_path.add_argument("version")
+    python_path.add_argument("version", help="version request or exact interpreter path")
 
     config = subparsers.add_parser(
         "config", aliases=COMMAND_ALIASES["config"],
         help="inspect effective configuration",
     )
-    config.add_argument("action", nargs="?", choices=["show"], default="show")
+    config.add_argument(
+        "action", nargs="?", choices=["show"], default="show",
+        help="configuration action (default: show)",
+    )
     return parser
 
 
@@ -340,7 +373,13 @@ def render_help(argv):
     parser = build_parser()
     selected, command_path = _help_parser(parser, argv)
     if any(item in DETAIL_FLAGS for item in argv):
-        selected.print_help()
+        canonical_path = []
+        for index, item in enumerate(command_path):
+            if index == 0:
+                canonical_path.append(COMMAND_NAMES.get(item, item))
+            else:
+                canonical_path.append(PYTHON_COMMAND_NAMES.get(item, item))
+        render_detailed_help(selected, canonical_path)
     else:
         _brief_help(selected, command_path)
 

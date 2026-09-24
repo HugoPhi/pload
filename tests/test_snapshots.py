@@ -195,7 +195,7 @@ def test_planned_restore_tries_next_candidate(tmp_path, monkeypatch):
     }]
     manager._execute_plan(tmp_path / "environment", requirements, plans)
     assert any("https://unavailable.example/simple" in command for command in attempts)
-    assert any(any(str(wheel) in part for part in command) for command in attempts)
+    assert any(any(wheel.resolve().as_uri() in part for part in command) for command in attempts)
 
 
 def test_repository_list_alias(tmp_path, capsys):

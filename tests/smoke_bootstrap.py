@@ -29,15 +29,15 @@ def main():
     launcher = bin_dir / ("pload.cmd" if os.name == "nt" else "pload")
     commands = [
         [str(launcher), "--version"],
-        [str(launcher), "python", "install", "3.12"],
-        [str(launcher), "python", "path", "3.12"],
+        [str(launcher), "py", "i", "3.12"],
+        [str(launcher), "py", "p", "3.12"],
         [
-            str(launcher), "new", "--name", "smoke", "--version", "3.12",
+            str(launcher), "n", "--name", "smoke", "--version", "3.12",
             "--description", "Cross-platform smoke environment",
         ],
-        [str(launcher), "list"],
-        [str(launcher), "path", "v1"],
-        [str(launcher), "rm", "v1", "--yes"],
+        [str(launcher), "ls"],
+        [str(launcher), "p", "v1"],
+        [str(launcher), "del", "v1", "--yes"],
     ]
     for command in commands:
         subprocess.run(command, check=True)

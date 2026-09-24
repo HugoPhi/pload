@@ -5,6 +5,9 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
+from rich.console import Console
+from rich.text import Text
+
 from pload.errors import PloadError
 from pload.managers.color import Colors
 
@@ -40,25 +43,50 @@ class VenvManager:
 
         python_exe = self.config.get_python_path(version)
         target_path.parent.mkdir(parents=True, exist_ok=True)
-        print(f"[*] Creating {Colors.green(display_name)} at {Colors.green(target_path)}")
-        process = subprocess.run(
-            [str(python_exe), "-m", "venv", str(target_path)],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        command = [str(python_exe), "-m", "venv", str(target_path)]
+        console = Console(highlight=False)
+        if console.is_terminal:
+            status = Text.assemble(
+                ("Creating ", "bold cyan"),
+                (display_name, "bold green"),
+                (" at ", "dim"),
+                (str(target_path), "green"),
+            )
+            with console.status(status, spinner="dots", spinner_style="bold cyan"):
+                process = subprocess.run(
+                    command, capture_output=True, text=True, check=False
+                )
+        else:
+            print(f"[*] Creating {Colors.green(display_name)} at {Colors.green(target_path)}")
+            process = subprocess.run(
+                command, capture_output=True, text=True, check=False
+            )
         if process.returncode != 0:
             shutil.rmtree(target_path, ignore_errors=True)
             detail = process.stderr.strip() or process.stdout.strip()
             raise PloadError(f"failed to create {display_name}: {detail}")
 
-        print(f"[*] Created {Colors.green(display_name)}")
+        if console.is_terminal:
+            console.print(Text.assemble(
+                ("✓ ", "bold green"),
+                ("Created ", "white"),
+                (display_name, "bold"),
+            ))
+        else:
+            print(f"[*] Created {Colors.green(display_name)}")
         entry = self.register_environment(
             target_path,
             name=display_name,
             description=description or "",
         )
-        print(f"[*] Assigned {Colors.cyan(entry['id'])}")
+        if console.is_terminal:
+            console.print(Text.assemble(
+                ("✓ ", "bold green"),
+                ("Assigned ", "white"),
+                (entry["id"], "bold cyan"),
+            ))
+        else:
+            print(f"[*] Assigned {Colors.cyan(entry['id'])}")
         return target_path
 
     @property

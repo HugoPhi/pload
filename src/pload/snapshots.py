@@ -259,7 +259,9 @@ class SnapshotManager:
                         shutil.copyfile(path / filename, wheel)
                         if digest(wheel) != data["files"][filename]:
                             raise PloadError("snapshot changed during restoration")
-                        artifacts.append(str(wheel))
+                        # Old pip records hashes only when supplied in the file URL.
+                        artifacts.append(wheel.resolve().as_uri() + "#sha256=" +
+                                         data["files"][filename])
                 if artifacts:
                     # Install exact verified files first so an index cannot replace them.
                     execute(self.config.get_pip_command(env) +

@@ -1,10 +1,12 @@
+from __future__ import annotations
+
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import ClassVar
 
@@ -17,6 +19,14 @@ class PythonRuntime:
     source: str
     path: Path
     implementation: str = "Python"
+    id: str | None = None
+    alias: str | None = None
+
+    @property
+    def display_id(self):
+        if self.id and self.alias:
+            return f"{self.id}:{self.alias}"
+        return self.id or self.alias or "-"
 
 
 class PythonManager:
@@ -109,7 +119,7 @@ class PythonManager:
             runtime = self._probe(path, source)
             if runtime:
                 discovered[key] = runtime
-        return sorted(
+        runtimes = sorted(
             discovered.values(),
             key=lambda item: (
                 self._version_key(item.version),
@@ -117,14 +127,86 @@ class PythonManager:
                 str(item.path),
             ),
         )
+        return self._assign_ids(runtimes)
+
+    @property
+    def registry_path(self):
+        return self.config.state_path / "python-runtimes.json"
+
+    def _assign_ids(self, runtimes):
+        """Persist a stable pyN ID for every currently discovered executable."""
+        path = self.registry_path
+        if path.is_file():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                raise PloadError(f"cannot read Python registry {path}: {exc}") from exc
+        else:
+            data = {"version": 1, "runtimes": []}
+        if not isinstance(data, dict) or not isinstance(data.get("runtimes"), list):
+            raise PloadError(f"invalid Python registry: {path}")
+
+        saved_records = [item for item in data["runtimes"] if item.get("path")]
+        saved = {
+            self._path_key(item.get("path", "")): item
+            for item in saved_records
+        }
+        used = {
+            int(item["id"][2:])
+            for item in saved.values()
+            if re.fullmatch(r"py\d+", str(item.get("id", "")))
+        }
+        assigned = []
+        changed = False
+        for runtime in runtimes:
+            key = self._path_key(runtime.path)
+            item = saved.get(key)
+            if item:
+                runtime_id = item["id"]
+            else:
+                number = 1
+                while number in used:
+                    number += 1
+                runtime_id = f"py{number}"
+                used.add(number)
+                changed = True
+            alias = f"{runtime.source}-v{runtime.version}"
+            if not item or item.get("alias") != alias or item.get("source") != runtime.source:
+                changed = True
+            assigned.append(replace(runtime, id=runtime_id, alias=alias))
+
+        current_records = [
+            {
+                "id": runtime.id,
+                "alias": runtime.alias,
+                "source": runtime.source,
+                "version": runtime.version,
+                "path": str(runtime.path),
+            }
+            for runtime in assigned
+        ]
+        records_by_path = {self._path_key(item["path"]): item for item in saved_records}
+        records_by_path.update({self._path_key(item["path"]): item for item in current_records})
+        records = list(records_by_path.values())
+        if changed or records != data["runtimes"]:
+            self.config.state_path.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                json.dumps({"version": 1, "runtimes": records}, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+        return assigned
 
     def find_python(self, version):
         requested = str(version)
+        runtimes = self.discover()
+        for runtime in runtimes:
+            if requested in {runtime.id, runtime.alias, runtime.display_id}:
+                return runtime.path
         for prefix in ("cpython@", "cpython-"):
             if requested.startswith(prefix):
                 requested = requested[len(prefix):]
         matches = [
-            runtime for runtime in self.discover()
+            runtime for runtime in runtimes
             if runtime.version == requested or runtime.version.startswith(requested + ".")
         ]
         if not matches:
@@ -144,14 +226,15 @@ class PythonManager:
     def format_runtimes(runtimes):
         if not runtimes:
             return []
+        id_width = max([10] + [len(item.display_id) for item in runtimes])
         version_width = max([7] + [len(item.version) for item in runtimes])
         source_width = max([4] + [len(item.source) for item in runtimes])
         lines = [
-            f"{'VERSION':<{version_width}}  {'TYPE':<{source_width}}  PATH",
-            f"{'-' * version_width}  {'-' * source_width}  {'-' * 4}",
+            f"{'ID / ALIAS':<{id_width}}  {'VERSION':<{version_width}}  {'TYPE':<{source_width}}  PATH",
+            f"{'-' * id_width}  {'-' * version_width}  {'-' * source_width}  {'-' * 4}",
         ]
         lines.extend(
-            f"{item.version:<{version_width}}  {item.source:<{source_width}}  {item.path}"
+            f"{item.display_id:<{id_width}}  {item.version:<{version_width}}  {item.source:<{source_width}}  {item.path}"
             for item in runtimes
         )
         return lines
@@ -396,7 +479,7 @@ class PythonManager:
 
     @staticmethod
     def _path_key(path):
-        return os.path.normcase(str(path.resolve()))
+        return os.path.normcase(str(Path(path).expanduser().resolve()))
 
     @staticmethod
     def _version_key(version):

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.9.2 - 2026-09-24
+
+### Added
+
+- Make bare `pload new` open a colored guided environment-creation flow.
+
+### Fixed
+
+- Make shell integration delegate bare `pload` to the executable so the welcome
+  screen still appears in new terminal sessions.
+- Change the `--message` short option from `-d` to `-m`, leaving `-d` solely
+  for detailed help.
+- Show global directory options only on `pload -h` and the welcome screen,
+  instead of repeating them under every subcommand.
+
 ## 0.9.1 - 2026-09-24
 
 ### Changed

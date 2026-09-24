@@ -198,8 +198,9 @@ PyPI mirror does not host those archives.
 Create a named environment with a description:
 
 ```console
-pload new -n data -v 3.12 -d "Data analysis"
-pload new -n web -v 3.12 -r fastapi uvicorn -d "Web API"
+pload new                     # guided creation
+pload new -n data -v 3.12 -m "Data analysis"
+pload new -n web -v 3.12 -r fastapi uvicorn -m "Web API"
 pload new -v 3.12 --message "Temporary data tools"  # auto-named safely
 pload list
 pload v1
@@ -208,7 +209,7 @@ pload v1
 Create a project-local environment:
 
 ```console
-pload init -d "Current project"
+pload init -m "Current project"
 pload .
 pload init -r pytest requests
 ```

@@ -542,6 +542,34 @@ def configure_shell(settings):
     return profile
 
 
+def print_welcome_screen(version, launcher, settings, profile=None):
+    """Show a friendly post-install landing screen with copyable next steps."""
+    print()
+    print(Colors.cyan("   ____  _                 _ "))
+    print(Colors.cyan("  |  _ \\| | ___   __ _  __| |"))
+    print(Colors.cyan("  | |_) | |/ _ \\ / _` |/ _` |"))
+    print(Colors.cyan("  |  __/| | (_) | (_| | (_| |"))
+    print(Colors.cyan("  |_|   |_|\\___/ \\__,_|\\__,_|"))
+    print(Colors.bold(f"\n  pload {version} is ready"))
+    print("  Your private runtime and launcher are installed.")
+    print()
+    print(Colors.bold("  Next steps"))
+    print(f"  {Colors.green('1')}  Check configuration:  pload cfg")
+    print(f"  {Colors.green('2')}  Find Python versions:  pload python list")
+    print(f"  {Colors.green('3')}  Create an environment: pload new -n data -v 3.12")
+    print(f"  {Colors.green('4')}  Read the walkthrough:  pload -h -d")
+    print()
+    print(Colors.bold("  Installed paths"))
+    print(f"  launcher   {launcher}")
+    print(f"  data       {settings['home']}")
+    print(f"  environments {settings['venvs_dir']}")
+    if profile:
+        print(f"  shell      updated {profile}")
+    else:
+        print(f"  shell      add {settings['bin_dir']} to PATH, then start a new shell")
+    print()
+
+
 def run(argv=None):
     raw_args = list(sys.argv[1:] if argv is None else argv)
     if any(item in {"-h", "--help"} for item in raw_args):
@@ -565,6 +593,7 @@ def run(argv=None):
         print(f"[*] Updated shell profile: {profile}")
     else:
         print(f"[!] Add {settings['bin_dir']} to PATH, then run: pload shell-init <shell>")
+    print_welcome_screen(installed_version, launcher, settings, profile)
     return 0
 
 

@@ -58,7 +58,7 @@ def build_parser():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Typical workflow:
   pload python install 3.12        Download a managed Python when needed
-  pload new -n data -v 3.12 -d "Data analysis"
+  pload new -n data -v 3.12 -m "Data analysis"
                                    Create a described environment with an ID
   pload v1                         Activate it by ID (after shell initialization)
   pload init                       Create .venv for the current project
@@ -81,12 +81,13 @@ Run `pload <command> -h -d` for complete command-specific examples.""",
         "new", aliases=COMMAND_ALIASES["new"], help="create a managed environment",
         description=(
             "Create a virtual environment under the configured managed root, or at an "
-            "explicit --path. The current Python is used when --version is omitted."
+            "explicit --path. Run without options to open guided creation. The current "
+            "Python is used when --version is omitted."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
   pload new -n tools
-  pload new -n data --version 3.12 -d "Data analysis" -r numpy pandas
+  pload new -n data --version 3.12 -m "Data analysis" -r numpy pandas
   pload new -p /mnt/venvs/build --version /opt/python/bin/python""",
     )
     new.add_argument(
@@ -96,7 +97,7 @@ Run `pload <command> -h -d` for complete command-specific examples.""",
     new.add_argument("--name", "-n", help="exact environment name")
     new.add_argument("--path", "-p", help="exact destination instead of the managed root")
     new.add_argument(
-        "--message", "-d", dest="description",
+        "--message", "-m", dest="description",
         help="human-readable purpose shown by pload list",
     )
     add_packages(new)
@@ -110,7 +111,7 @@ Run `pload <command> -h -d` for complete command-specific examples.""",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
   pload init
-  pload init --project-dir ./service --venv-dir .runtime/python -d "Service tools"
+  pload init --project-dir ./service --venv-dir .runtime/python -m "Service tools"
   pload init --project-dir /srv/app --venv-dir /mnt/venvs/app -v 3.12""",
     )
     init.add_argument(
@@ -123,7 +124,7 @@ Run `pload <command> -h -d` for complete command-specific examples.""",
         help="environment path, relative to --project-dir or absolute",
     )
     init.add_argument(
-        "--message", "-d", dest="description",
+        "--message", "-m", dest="description",
         help="human-readable purpose shown by pload list",
     )
     add_packages(init)
@@ -377,6 +378,17 @@ def _help_parser(parser, argv):
     return selected, command_path
 
 
+def _global_options_table(root_parser):
+    table = Table(title="Global options", box=box.SIMPLE, header_style="bold cyan", show_edge=False)
+    table.add_column("OPTION", style="bold green", no_wrap=True)
+    table.add_column("PURPOSE")
+    for action in root_parser._actions:
+        if action.dest in {"help", "command"} or not action.option_strings:
+            continue
+        table.add_row(", ".join(action.option_strings), action.help or "")
+    return table
+
+
 def _brief_help(parser, command_path, root_parser=None):
     console = Console(highlight=False)
     title = f"pload {__version__}" if not command_path else "pload " + " ".join(command_path)
@@ -429,9 +441,11 @@ def _brief_help(parser, command_path, root_parser=None):
             table.add_row(command, ", ".join(aliases) if aliases else "—", summaries[command])
         console.print(table)
         console.print("[bold cyan]Quick start[/]")
-        console.print("  [green]pload new -n data -d \"Data analysis\"[/]")
+        console.print("  [green]pload new[/]  [dim]# guided creation[/]")
+        console.print("  [green]pload new -n data -m \"Data analysis\"[/]")
         console.print("  [green]pload ls[/]")
         console.print("  [green]pload v1[/]  [dim]# activate after shell initialization[/]")
+        console.print(_global_options_table(root_parser or parser))
     else:
         choices = _subparser_choices(parser)
         if choices:
@@ -463,19 +477,6 @@ def _brief_help(parser, command_path, root_parser=None):
                     label += " ..."
                 table.add_row(label, action.help or "")
             console.print(table)
-
-    if command_path and root_parser is not None:
-        global_table = Table(
-            title="Global options (before the command)", box=box.SIMPLE,
-            header_style="bold cyan", show_edge=False,
-        )
-        global_table.add_column("OPTION", style="bold green", no_wrap=True)
-        global_table.add_column("PURPOSE")
-        for action in root_parser._actions:
-            if action.dest in {"help", "command"} or not action.option_strings:
-                continue
-            global_table.add_row(", ".join(action.option_strings), action.help or "")
-        console.print(global_table)
 
     detail_command = " ".join(command_path)
     detail = f"pload {detail_command} -h -d" if detail_command else "pload -h -d"
@@ -516,10 +517,12 @@ def render_landing():
     table.add_column("WHAT IT DOES")
     table.add_row("pload cfg", "Show where pload stores its data")
     table.add_row("pload python list", "Find every usable Python interpreter")
+    table.add_row("pload new", "Open guided environment creation")
     table.add_row("pload new -n data -v 3.12", "Create a named virtual environment")
     table.add_row("pload list", "List environments, IDs, and descriptions")
     table.add_row("pload v1", "Activate an environment by ID")
     console.print(table)
+    console.print(_global_options_table(build_parser()))
     console.print("\n[dim]More help: [bold]pload -h[/bold]  ·  examples: [bold]pload -h -d[/bold][/dim]")
 
 
@@ -527,7 +530,7 @@ def shell_script(shell):
     if shell in {"bash", "zsh"}:
         return r'''pload() {
     case "${1:-}" in
-        new|n|create|init|i|rm|remove|del|delete|list|ls|path|p|shell-init|shell|python|py|config|cfg|-*)
+        ""|new|init|i|rm|remove|del|delete|list|ls|path|p|shell-init|shell|python|py|config|cfg|-*)
             command pload "$@"
             ;;
         *)
@@ -540,7 +543,7 @@ def shell_script(shell):
     if shell == "fish":
         return r'''function pload
     switch "$argv[1]"
-        case new n create init i rm remove del delete list ls path p shell-init shell python py config cfg '-*'
+        case '' new init i rm remove del delete list ls path p shell-init shell python py config cfg '-*'
             command pload $argv
         case '*'
             set -l name .
@@ -554,9 +557,13 @@ def shell_script(shell):
 end'''
     return r'''function pload {
     param([Parameter(ValueFromRemainingArguments = $true)][string[]]$PloadArgs)
-    $commands = @('new', 'n', 'create', 'init', 'i', 'rm', 'remove', 'del', 'delete', 'list', 'ls', 'path', 'p', 'shell-init', 'shell', 'python', 'py', 'config', 'cfg', '-h', '--help', '--version')
+    $commands = @('new', 'init', 'i', 'rm', 'remove', 'del', 'delete', 'list', 'ls', 'path', 'p', 'shell-init', 'shell', 'python', 'py', 'config', 'cfg', '-h', '--help', '--version')
     $backend = Get-Command -Name @('pload.exe', 'pload.cmd') -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $backend) { throw 'pload executable not found on PATH' }
+    if ($PloadArgs.Count -eq 0) {
+        & $backend.Source
+        return
+    }
     if ($PloadArgs.Count -gt 0 -and ($commands -contains $PloadArgs[0] -or $PloadArgs[0].StartsWith('-'))) {
         & $backend.Source @PloadArgs
         return
@@ -565,6 +572,41 @@ end'''
     $activatePath = & $backend.Source path $name --shell powershell
     if ($LASTEXITCODE -eq 0) { . $activatePath }
 }'''
+
+
+def _guided_new(config):
+    """Collect useful creation choices when ``pload new`` is run by itself."""
+    console = Console(highlight=False)
+    console.print(Panel.fit(
+        "Choose an interpreter and an optional name. Press Enter to accept defaults.",
+        title="[bold cyan]Guided environment creation[/]",
+        border_style="blue",
+    ))
+    runtimes = PythonManager(config).discover()
+    if runtimes:
+        console.print("[dim]Use a Python ID, alias, version, or interpreter path:[/]")
+        print_python_table(runtimes)
+    else:
+        console.print("[yellow]No Python was discovered; the current Python is the default.[/]")
+
+    def ask(label, default=""):
+        suffix = f" [{default}]" if default else ""
+        value = input(f"{label}{suffix}: ").strip()
+        return value or default
+
+    version = ask("Python ID, alias, version, or path", "current")
+    _, suggested_name = config.resolve_venv_path(version=version)
+    name = ask("Environment name (blank generates one)")
+    if not name:
+        console.print(f"[dim]Generated name: [bold]{suggested_name}[/][/dim]")
+    description = ask("Description (optional)")
+    packages = ask("Packages, separated by spaces (optional)")
+    return {
+        "python_version": version,
+        "name": name or None,
+        "description": description or None,
+        "requirements": packages.split() or None,
+    }
 
 
 def run(argv=None):
@@ -582,6 +624,12 @@ def run(argv=None):
     dependencies = DependencyManager(config)
 
     if command == "new":
+        if not any((args.python_version, args.name, args.path, args.description, args.requirements, args.channel)):
+            guided = _guided_new(config)
+            args.python_version = guided["python_version"]
+            args.name = guided["name"]
+            args.description = guided["description"]
+            args.requirements = guided["requirements"]
         path = venvs.create_venv(
             version=args.python_version,
             target=args.path,

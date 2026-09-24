@@ -51,6 +51,16 @@ def test_shell_init_recognizes_short_command_aliases():
             assert alias in output
 
 
+def test_shell_init_delegates_bare_pload_to_the_backend():
+    bash = shell_script("bash")
+    fish = shell_script("fish")
+    powershell = shell_script("powershell")
+
+    assert '""|new' in bash
+    assert "case '' new" in fish
+    assert "$PloadArgs.Count -eq 0" in powershell
+
+
 def test_remove_refuses_environment_symlink(tmp_path, capsys):
     target = tmp_path / "target"
     target.mkdir()
@@ -115,7 +125,7 @@ def test_simple_commands_have_no_alias_but_long_options_have_short_forms():
 
 
 def test_description_short_option_does_not_conflict_with_detailed_help():
-    args = build_parser().parse_args(["new", "--message", "Data tools"])
+    args = build_parser().parse_args(["new", "-m", "Data tools"])
 
     assert args.description == "Data tools"
 
@@ -152,7 +162,7 @@ def test_command_specific_detailed_help_uses_d_flag(capsys):
     assert "pload new -h -d" in brief
     assert "--name, -n" in brief
     assert "--requirements, -r" in brief
-    assert "--home, -H" in brief
+    assert "--home, -H" not in brief
 
     assert main(["new", "-h", "-d"]) == 0
     detailed = capsys.readouterr().out
@@ -182,7 +192,7 @@ def test_brief_help_includes_positional_arguments_and_all_options(capsys):
     assert main(["py", "install", "-h"]) == 0
     install_help = capsys.readouterr().out
     assert "version" in install_help
-    assert "--home, -H" in install_help
+    assert "--home, -H" not in install_help
     assert "usage: pload py install [-h] version" in install_help
 
 
@@ -199,8 +209,40 @@ def test_no_arguments_show_welcome_and_simple_usage(capsys):
 
     assert "pload" in output
     assert "Simple usage" in output
+    assert "Open guided environment creation" in output
+    assert "Global options" in output
     assert "pload new -n data -v 3.12" in output
     assert "pload -h -d" in output
+
+
+def test_new_without_options_uses_guided_creation(tmp_path, monkeypatch):
+    captured = {}
+
+    monkeypatch.setattr(
+        "pload.cli._guided_new",
+        lambda config: {
+            "python_version": "current",
+            "name": "guided",
+            "description": "Created interactively",
+            "requirements": None,
+        },
+    )
+    monkeypatch.setattr(
+        "pload.cli.VenvManager.create_venv",
+        lambda self, **kwargs: captured.update(kwargs) or tmp_path / "guided",
+    )
+    monkeypatch.setattr(
+        "pload.cli.DependencyManager.install_dependencies",
+        lambda self, path, requirements, channel: None,
+    )
+
+    assert main(["-H", str(tmp_path / "home"), "new"]) == 0
+    assert captured == {
+        "version": "current",
+        "target": None,
+        "name": "guided",
+        "description": "Created interactively",
+    }
 
 
 def test_detailed_help_explains_command_effects(capsys):

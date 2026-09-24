@@ -13,7 +13,7 @@ creates. You can delete an environment without deleting the `pload` command.
 ## Create, inspect, and enter an environment
 
 ```console
-$ pload new -n data --version 3.12 -d "Data analysis"
+$ pload new -n data --version 3.12 -m "Data analysis"
 ⠋ Creating data at /home/me/venvs/data
 ✓ Created data
 ✓ Assigned v1
@@ -57,7 +57,7 @@ Use `pload cfg` to see the exact effective paths before creating anything.
 ## Typical example
 
 ```console
-$ pload new -n web --version 3.12 -d "Web API" -r fastapi uvicorn
+$ pload new -n web --version 3.12 -m "Web API" -r fastapi uvicorn
 ⠙ Creating web at /home/me/venvs/web
 ✓ Created web
 ✓ Assigned v3
@@ -68,7 +68,8 @@ the managed environment root, stores the description, assigns the next ID, and
 then installs `fastapi` and `uvicorn` inside that environment.
 
 If `--name` is omitted, pload generates a short unique name such as
-`python-3.12` or `python-3.12-2`. Use `--message` (or `-d`) for the human
+`python-3.12` or `python-3.12-2`. Running `pload new` without options opens a
+guided creator. Use `--message` (or `-m`) for the human
 description; it never affects the generated directory name.
 
 ## Choose an exact location or interpreter
@@ -76,7 +77,7 @@ description; it never affects the generated directory name.
 ```console
 $ pload new --path /mnt/project-envs/build \
     --version /opt/python/bin/python \
-    -d "Release build tools"
+    -m "Release build tools"
 ```
 
 The environment may live anywhere; its metadata remains in the configured
@@ -96,7 +97,7 @@ is not appropriate.
 
 ```console
 $ cd ~/projects/service
-$ pload i -d "Service development"
+$ pload i -m "Service development"
 ✓ Created .venv
 ✓ Assigned v4
 $ pload .

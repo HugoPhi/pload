@@ -174,5 +174,9 @@ def test_installer_has_brief_and_detailed_help(capsys):
 
     assert run(["-h", "-d"]) == 0
     detailed = capsys.readouterr().out
+    assert "What an interactive run looks like" in detailed
+    assert "Enter a number" in detailed
+    assert "Resulting layout" in detailed
+    assert "What the installer changes" in detailed
     assert "--downloads-json-url" in detailed
     assert "--pip-source" in detailed

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pload"
-version = "0.8.0"
+version = "0.8.1"
 description = "A small, relocatable Python virtual environment manager"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -21,7 +21,7 @@ classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
 ]
-dependencies = ["rich>=13.7,<15", "rich-argparse>=1.7,<1.7.1"]
+dependencies = ["rich>=13.7,<15"]
 
 [project.scripts]
 pload = "pload.cli:main"

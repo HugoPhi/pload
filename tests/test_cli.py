@@ -113,9 +113,11 @@ def test_brief_and_detailed_help_are_distinct(capsys):
     assert main(["-h", "-d"]) == 0
     detailed = capsys.readouterr().out
 
-    assert "Typical workflow:" in detailed
-    assert "Isolation:" in detailed
-    assert "--state-dir" in detailed
+    assert "A practical pload walkthrough" in detailed
+    assert "$ pload n --name data" in detailed
+    assert "What changes on disk" in detailed
+    assert "PLOAD_HOME/runtime" in detailed
+    assert "Related options" in detailed
 
 
 def test_command_specific_detailed_help_uses_d_flag(capsys):
@@ -126,8 +128,29 @@ def test_command_specific_detailed_help_uses_d_flag(capsys):
 
     assert main(["new", "-h", "-d"]) == 0
     detailed = capsys.readouterr().out
-    assert "Examples:" in detailed
-    assert "--description" in detailed
+    normalized = " ".join(detailed.split())
+    assert "Typical example" in detailed
+    assert "$ pload n --name web" in detailed
+    assert "Assigned v3" in detailed
+    assert "Effects and failure behavior" in detailed
+    assert "incomplete directory is removed" in normalized
+
+
+def test_detailed_help_explains_command_effects(capsys):
+    expectations = [
+        (["list", "-h", "-d"], "Listing never deletes", "legacy environments"),
+        (["rm", "-h", "-d"], "Safety effects", "Refuses to delete"),
+        (["py", "i", "-h", "-d"], "Does not modify /usr/bin", "runtime source"),
+        (["py", "ls", "-h", "-d"], "Discovery probes", "does not install"),
+        (["cfg", "-h", "-d"], "read-only", "where a new environment"),
+    ]
+
+    for argv, explanation, effect in expectations:
+        assert main(argv) == 0
+        output = capsys.readouterr().out
+        normalized = " ".join(output.split())
+        assert explanation in normalized
+        assert effect in normalized
 
 
 def test_help_finds_command_after_global_path_option(tmp_path, capsys):

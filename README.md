@@ -227,16 +227,18 @@ Help has two levels:
 
 ```console
 pload -h                 # compact colored command guide
-pload -h -d              # complete global reference
+pload -h -d              # practical walkthrough with examples and effects
 pload new -h             # compact command help
-pload new -h -d          # complete options and examples
-pload py ls -h -d        # detailed nested-command help
+pload new -h -d          # creation examples, output, side effects, and failures
+pload py ls -h -d        # discovery examples and what the scan changes
 pload-install -h         # compact installer guide
-pload-install -h -d      # complete installer reference
+pload-install -h -d      # guided prompts, resulting layout, and shell changes
 ```
 
 The `-d` option remains the description shorthand for `new` and `init` when
 `-h` is not present, so `pload n -d "Data analysis"` remains unambiguous.
+Detailed help is intentionally task-oriented: the related-options table appears
+only after copyable commands, expected output, explanations, and on-disk effects.
 
 ## Directory isolation
 

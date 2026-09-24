@@ -7,9 +7,9 @@ from pathlib import Path
 
 from rich import box
 from rich.console import Console
+from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
-from rich_argparse import RawDescriptionRichHelpFormatter
 
 from pload import __version__
 from pload.errors import PloadError
@@ -48,7 +48,7 @@ def build_parser():
             "Install pload into its own private runtime, create a stable executable in a "
             "user-selected bin directory, and configure managed Python downloads."
         ),
-        formatter_class=RawDescriptionRichHelpFormatter,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
   pload-install
       Start the interactive installer.
@@ -102,7 +102,93 @@ numbered menu with an explanation for every option.""",
 def render_help(detailed=False):
     parser = build_parser()
     if detailed:
-        parser.print_help()
+        console = Console(highlight=False)
+        console.print(Markdown(r"""
+# Install pload without tying it to a project environment
+
+The guided installer asks where every kind of data should live. Press Enter to
+accept a recommended value, or enter a different directory.
+
+## What an interactive run looks like
+
+```console
+$ pload-install
+pload home [/home/me/.pload]: /mnt/tools/pload
+executable bin directory [/home/me/.local/bin]:
+managed virtual environment directory [/mnt/tools/pload/venvs]: /mnt/venvs
+managed Python directory [/mnt/tools/pload/pythons]: /mnt/python
+
+Choose the Python runtime download source
+  1) official (default)
+  2) ustc
+  3) custom
+Enter a number [1]: 2
+
+Choose the Python package index used to install pload and uv
+  1) official (default)
+  2) tsinghua
+  3) ustc
+  4) aliyun
+  5) custom
+Enter a number [1]: 3
+```
+
+## Resulting layout
+
+```text
+/mnt/tools/pload/
+├── config.json       saved choices
+├── runtime/          private Python environment containing pload and uv
+├── state/            environment IDs and descriptions
+├── cache/python/     managed-Python download cache
+└── python-bin/       links to managed Python executables
+
+/mnt/python/          downloaded Python runtimes
+/mnt/venvs/           managed virtual environments
+~/.local/bin/pload    stable launcher
+```
+
+The stable launcher always calls the private runtime, so activating or deleting
+a project environment cannot remove the `pload` command.
+
+## What the installer changes
+
+- Creates the selected directories and `config.json`.
+- Installs pload and uv inside `PLOAD_HOME/runtime`.
+- Writes a launcher into the selected bin directory.
+- Updates a shell profile only when you choose a shell; the managed block can be
+  replaced safely by a later installer run.
+- Keeps Python runtime mirrors separate from PyPI package indexes.
+
+## Repeatable non-interactive setup
+
+```console
+$ pload-install --yes \
+    --home /mnt/tools/pload \
+    --bin-dir ~/.local/bin \
+    --venvs-dir /mnt/venvs \
+    --python-dir /mnt/python \
+    --source ustc \
+    --pip-source ustc \
+    --shell zsh
+```
+
+`--yes` reuses explicit values and saved defaults. It does not edit a shell
+profile unless `--shell` is supplied or already saved in the configuration.
+""".strip()))
+        table = Table(
+            title="Related options",
+            box=box.ROUNDED,
+            header_style="bold cyan",
+            border_style="blue",
+        )
+        table.add_column("OPTION", style="bold green", no_wrap=True)
+        table.add_column("MEANING")
+        for action in parser._actions:
+            if action.dest == "help" or not action.option_strings:
+                continue
+            table.add_row(", ".join(action.option_strings), action.help or "")
+        console.print(table)
         return
     console = Console(highlight=False)
     console.print(Panel.fit(

@@ -11,6 +11,7 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 
 from pload import __version__
 from pload.errors import PloadError
@@ -192,6 +193,22 @@ profile unless `--shell` is supplied or already saved in the configuration.
         console.print(table)
         return
     console = Console(highlight=False)
+    usage = " ".join(parser.format_usage().split())
+    usage_text = Text()
+    for index, token in enumerate(usage.split()):
+        if index:
+            usage_text.append(" ")
+        if token == "usage:":
+            usage_text.append(token, style="dim")
+        elif token.startswith("pload-install"):
+            usage_text.append(token, style="bold green")
+        elif token.startswith("-"):
+            usage_text.append(token, style="bold yellow")
+        elif token.startswith(("[", "{")):
+            usage_text.append(token, style="bold cyan")
+        else:
+            usage_text.append(token, style="white")
+    console.print(usage_text)
     console.print(Panel.fit(
         "Install pload into an isolated private runtime and choose every storage root.",
         title="[bold cyan]pload-install[/]",

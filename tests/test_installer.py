@@ -172,6 +172,7 @@ def test_installer_has_brief_and_detailed_help(capsys):
     assert "pload-install -h -d" in brief
     assert "--downloads-json-url" in brief
     assert "--home, -H" in brief
+    assert brief.splitlines()[0].startswith("usage: pload-install")
 
     assert run(["-h", "-d"]) == 0
     detailed = capsys.readouterr().out

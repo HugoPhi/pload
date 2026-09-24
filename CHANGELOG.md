@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.6 - 2026-09-24
+
+### Changed
+
+- Add a complete, highlighted `usage:` line at the top of every brief help
+  screen.
+- Show the command spelling actually used, including aliases, in that usage
+  line.
+
 ## 0.8.5 - 2026-09-24
 
 ### Changed

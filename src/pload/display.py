@@ -27,9 +27,15 @@ def print_environment_table(environments):
 
 def print_python_table(runtimes):
     table = Table(box=box.ROUNDED, header_style="bold cyan", border_style="blue")
+    table.add_column("ID / ALIAS", style="bold green", no_wrap=True)
     table.add_column("VERSION", style="bold green", no_wrap=True)
     table.add_column("TYPE", style="yellow", no_wrap=True)
     table.add_column("PATH", style="dim", overflow="fold")
     for runtime in runtimes:
-        table.add_row(runtime.version, runtime.source, str(runtime.path))
+        table.add_row(
+            runtime.display_id,
+            runtime.version,
+            runtime.source,
+            str(runtime.path),
+        )
     _console().print(table)

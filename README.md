@@ -155,6 +155,23 @@ pload python list --filter uv conda
 pload python path 3.12
 ```
 
+Each distinct executable receives a stable Python ID and readable alias:
+
+```text
+ID / ALIAS            VERSION  TYPE    PATH
+py1:uv-v3.12.8        3.12.8   uv      ~/.pload/pythons/.../python3.12
+py2:conda-v3.11.9     3.11.9   conda   ~/miniforge3/envs/data/bin/python
+```
+
+Use any of these forms when selecting an interpreter:
+
+```console
+pload new -n data --version py1
+pload new -n data --version uv-v3.12.8
+pload new -n data --version py1:uv-v3.12.8
+pload python path py1
+```
+
 Types include `sys`, `pyenv`, `uv`, `conda`, `mise`, `asdf`, `homebrew`, and
 `other`. Compatibility names `system` and `managed` map to `sys` and `uv`.
 
@@ -275,7 +292,7 @@ PLOAD_HOME/
 ├── pythons/          downloaded Python runtimes
 ├── python-bin/       managed Python executable links
 ├── cache/python/     Python download cache
-├── state/            environment IDs and descriptions
+├── state/            environment IDs and Python runtime IDs
 └── venvs/            managed virtual environments
 ```
 

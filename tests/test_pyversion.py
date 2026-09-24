@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -38,7 +39,9 @@ def test_discovery_deduplicates_resolved_paths_and_filters(monkeypatch, tmp_path
 
     discovered = manager.discover(["uv"])
 
-    assert discovered == [PythonRuntime("3.12.8", "uv", python.resolve(), "CPython")]
+    assert discovered == [PythonRuntime(
+        "3.12.8", "uv", python.resolve(), "CPython", "py1", "uv-v3.12.8"
+    )]
 
 
 def test_find_python_chooses_newest_matching_patch(monkeypatch, tmp_path):
@@ -63,6 +66,26 @@ def test_runtime_table_includes_type_and_path():
         PythonRuntime("3.11.9", "conda", conda_path),
     ])
 
-    assert lines[0].split() == ["VERSION", "TYPE", "PATH"]
+    assert lines[0].split() == ["ID", "/", "ALIAS", "VERSION", "TYPE", "PATH"]
     assert any("3.12.8" in line and "uv" in line and str(uv_path) in line for line in lines)
     assert any("3.11.9" in line and "conda" in line for line in lines)
+
+
+def test_python_registry_assigns_ids_and_resolves_id_or_alias(monkeypatch, tmp_path):
+    manager = PythonManager(ConfigManager(home=tmp_path / "home"))
+    uv_path = tmp_path / "uv-python"
+    conda_path = tmp_path / "conda-python"
+    runtimes = [
+        PythonRuntime("3.8.10", "uv", uv_path),
+        PythonRuntime("3.11.9", "conda", conda_path),
+    ]
+    monkeypatch.setattr(manager, "_candidate_paths", lambda selected=None: [])
+    monkeypatch.setattr(manager, "_probe", lambda path, source: None)
+    monkeypatch.setattr(manager, "discover", lambda sources=None: [
+        replace(runtimes[0], id="py1", alias="uv-v3.8.10"),
+        replace(runtimes[1], id="py2", alias="conda-v3.11.9"),
+    ])
+
+    assert manager.find_python("py1") == uv_path
+    assert manager.find_python("uv-v3.8.10") == uv_path
+    assert manager.find_python("py1:uv-v3.8.10") == uv_path

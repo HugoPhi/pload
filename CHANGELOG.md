@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.9.0 - 2026-09-24
+
+### Added
+
+- Assign stable `pyN` IDs and readable `source-v<version>` aliases to distinct
+  discovered Python executable paths.
+- Resolve `py1`, `uv-v3.12.8`, and `py1:uv-v3.12.8` when creating environments
+  or querying `pload python path`.
+- Persist Python discovery records separately from the virtual-environment
+  registry.
+
+### Changed
+
+- `pload python list` now shows ID/alias, version, source, and path together.
+
 ## 0.8.9 - 2026-09-24
 
 ### Changed

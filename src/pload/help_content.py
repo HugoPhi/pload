@@ -246,10 +246,10 @@ The version may be a minor request such as `3.12` or an exact patch such as
 
 ```console
 $ pload py ls
-VERSION   TYPE      PATH
-3.11.9    conda     /opt/miniforge/envs/data/bin/python
-3.12.8    uv        /home/me/.pload/pythons/.../python3.12
-3.13.3    homebrew  /opt/homebrew/.../python3.13
+ID / ALIAS              VERSION   TYPE      PATH
+py1:conda-v3.11.9       3.11.9    conda     /opt/miniforge/envs/data/bin/python
+py2:uv-v3.12.8          3.12.8    uv        /home/me/.pload/pythons/.../python3.12
+py3:homebrew-v3.13.3    3.13.3    homebrew  /opt/homebrew/.../python3.13
 
 $ pload py ls --filter uv,conda
 ```
@@ -258,14 +258,16 @@ Types include `sys`, `pyenv`, `uv`, `conda`, `mise`, `asdf`, `homebrew`, and
 `other`. Commas and spaces are both accepted by `--filter`.
 
 Discovery probes candidate executables for their real version and resolves
-symbolic links to suppress duplicates. It does not install, remove, or change
-any interpreter.
+symbolic links to suppress duplicates. Each distinct path receives a stable
+`pyN` ID and a readable `source-v<version>` alias. You can pass `py1`,
+`uv-v3.12.8`, or `py1:uv-v3.12.8` to `pload new --version` or `pload py p`.
+Discovery does not install, remove, or change any interpreter.
 """,
     ("python", "path"): r"""
 # See which Python a request selects
 
 ```console
-$ pload py p 3.12
+$ pload py p py2
 /home/me/.pload/pythons/cpython-3.12.8/bin/python3.12
 ```
 

@@ -29,10 +29,10 @@ def main():
     launcher = bin_dir / ("pload.cmd" if os.name == "nt" else "pload")
     commands = [
         [str(launcher), "--version"],
-        [str(launcher), "py", "i", "3.12"],
+        [str(launcher), "python", "install", "3.12"],
         [str(launcher), "py", "p", "3.12"],
         [
-            str(launcher), "n", "--name", "smoke", "--version", "3.12",
+            str(launcher), "new", "-n", "smoke", "-v", "3.12",
             "--description", "Cross-platform smoke environment",
         ],
         [str(launcher), "ls"],

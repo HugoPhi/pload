@@ -66,34 +66,34 @@ The installer never modifies a shell profile unless --shell is supplied or the
 interactive user explicitly chooses it. Interactive source selection uses a
 numbered menu with an explanation for every option.""",
     )
-    parser.add_argument("--home", help="pload data and private-runtime directory")
-    parser.add_argument("--bin-dir", help="directory for the stable pload executable")
-    parser.add_argument("--venvs-dir", help="directory for managed virtual environments")
-    parser.add_argument("--python-dir", help="directory for downloaded Python runtimes")
+    parser.add_argument("--home", "-H", help="pload data and private-runtime directory")
+    parser.add_argument("--bin-dir", "-b", help="directory for the stable pload executable")
+    parser.add_argument("--venvs-dir", "-E", help="directory for managed virtual environments")
+    parser.add_argument("--python-dir", "-p", help="directory for downloaded Python runtimes")
     parser.add_argument(
-        "--source", choices=["official", "ustc", "custom"],
+        "--source", "-s", choices=["official", "ustc", "custom"],
         help="managed Python download source",
     )
-    parser.add_argument("--mirror-url", help="base URL or file:// URL for --source custom")
+    parser.add_argument("--mirror-url", "-m", help="base URL or file:// URL for --source custom")
     parser.add_argument(
-        "--downloads-json-url",
+        "--downloads-json-url", "-j",
         help="advanced uv download metadata URL or local JSON path",
     )
     parser.add_argument(
-        "--pip-source", choices=["official", "tsinghua", "ustc", "aliyun", "custom"],
+        "--pip-source", "-P", choices=["official", "tsinghua", "ustc", "aliyun", "custom"],
         help="package index preset used for the private runtime",
     )
-    parser.add_argument("--pip-index", help="package index used to install pload and uv")
+    parser.add_argument("--pip-index", "-i", help="package index used to install pload and uv")
     parser.add_argument(
-        "--package-spec", help="pload package requirement or local project path"
+        "--package-spec", "-k", help="pload package requirement or local project path"
     )
     parser.add_argument(
-        "--shell", choices=["bash", "zsh", "fish", "powershell", "none"],
+        "--shell", "-S", choices=["bash", "zsh", "fish", "powershell", "none"],
         help="shell profile to configure",
     )
     parser.add_argument("--yes", "-y", action="store_true", help="accept defaults")
     parser.add_argument(
-        "--no-runtime-install", action="store_true",
+        "--no-runtime-install", "-N", action="store_true",
         help="write configuration only; useful for packaging and tests",
     )
     return parser

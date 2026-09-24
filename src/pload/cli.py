@@ -20,7 +20,7 @@ from pload.managers.pyversion import PythonManager
 from pload.managers.venv import VenvManager
 
 COMMAND_ALIASES = {
-    "new": ("n", "create"),
+    "new": (),
     "init": ("i",),
     "rm": ("remove", "del", "delete"),
     "list": ("ls",),
@@ -30,7 +30,7 @@ COMMAND_ALIASES = {
     "config": ("cfg",),
 }
 PYTHON_ALIASES = {
-    "install": ("i",),
+    "install": (),
     "list": ("ls",),
     "path": ("p",),
 }
@@ -58,7 +58,7 @@ def build_parser():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Typical workflow:
   pload python install 3.12        Download a managed Python when needed
-  pload new --name data -v 3.12 -d "Data analysis"
+  pload new -n data -v 3.12 -d "Data analysis"
                                    Create a described environment with an ID
   pload v1                         Activate it by ID (after shell initialization)
   pload init                       Create .venv for the current project
@@ -67,14 +67,14 @@ def build_parser():
 Isolation:
   PLOAD_HOME=/mnt/pload pload list
   pload --venvs-dir /mnt/venvs new --name tools
-  pload init --project-dir ./app --venv-dir /mnt/venvs/app
+  pload init -P ./app -e /mnt/venvs/app
 
 Run `pload <command> -h -d` for complete command-specific examples.""",
     )
-    parser.add_argument("--home", help="data root (or set PLOAD_HOME)")
-    parser.add_argument("--venvs-dir", help="managed environment root (or PLOAD_VENVS_DIR)")
-    parser.add_argument("--state-dir", help="state root (or PLOAD_STATE_DIR)")
-    parser.add_argument("--version", action="version", version=f"pload {__version__}")
+    parser.add_argument("--home", "-H", help="data root (or set PLOAD_HOME)")
+    parser.add_argument("--venvs-dir", "-E", help="managed environment root (or PLOAD_VENVS_DIR)")
+    parser.add_argument("--state-dir", "-S", help="state root (or PLOAD_STATE_DIR)")
+    parser.add_argument("--version", "-V", action="version", version=f"pload {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     new = subparsers.add_parser(
@@ -85,9 +85,9 @@ Run `pload <command> -h -d` for complete command-specific examples.""",
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
-  pload new --name tools
-  pload new --name data --version 3.12 -d "Data analysis" -r numpy pandas
-  pload new --path /mnt/venvs/build --version /opt/python/bin/python""",
+  pload new -n tools
+  pload new -n data --version 3.12 -d "Data analysis" -r numpy pandas
+  pload new -p /mnt/venvs/build --version /opt/python/bin/python""",
     )
     new.add_argument(
         "--version", "-v", dest="python_version",
@@ -97,8 +97,8 @@ Run `pload <command> -h -d` for complete command-specific examples.""",
         "--message", "-m", default="normal",
         help="legacy suffix used only when --name is omitted",
     )
-    new.add_argument("--name", help="exact environment name")
-    new.add_argument("--path", help="exact destination instead of the managed root")
+    new.add_argument("--name", "-n", help="exact environment name")
+    new.add_argument("--path", "-p", help="exact destination instead of the managed root")
     new.add_argument("--description", "-d", help="human-readable purpose shown by pload list")
     add_packages(new)
 
@@ -118,9 +118,9 @@ Run `pload <command> -h -d` for complete command-specific examples.""",
         "--version", "-v", dest="python_version",
         help="Python version request or exact interpreter path",
     )
-    init.add_argument("--project-dir", default=".", help="project directory (default: current)")
+    init.add_argument("--project-dir", "-P", default=".", help="project directory (default: current)")
     init.add_argument(
-        "--venv-dir", default=".venv",
+        "--venv-dir", "-e", default=".venv",
         help="environment path, relative to --project-dir or absolute",
     )
     init.add_argument("--description", "-d", help="human-readable purpose shown by pload list")
@@ -150,7 +150,7 @@ Run `pload <command> -h -d` for complete command-specific examples.""",
         help="select managed environment names with a regular expression",
     )
     remove.add_argument(
-        "--project-dir", default=".",
+        "--project-dir", "-P", default=".",
         help="project containing .venv when removing '.'",
     )
     remove.add_argument(
@@ -186,10 +186,10 @@ Run `pload <command> -h -d` for complete command-specific examples.""",
     )
     path.add_argument("name", help="environment ID, name, '.', or explicit path")
     path.add_argument(
-        "--project-dir", default=".", help="project directory used when name is '.'"
+        "--project-dir", "-P", default=".", help="project directory used when name is '.'"
     )
     path.add_argument(
-        "--shell", choices=["bash", "zsh", "fish", "powershell"],
+        "--shell", "-s", choices=["bash", "zsh", "fish", "powershell"],
         help="print this shell's activation script instead of the environment root",
     )
 
@@ -329,10 +329,11 @@ def _brief_help(parser, command_path):
             "shell-init": "Print shell activation integration",
         }
         for command in ("new", "init", "list", "rm", "python", "path", "config", "shell-init"):
-            table.add_row(command, ", ".join(COMMAND_ALIASES[command]), summaries[command])
+            aliases = COMMAND_ALIASES[command]
+            table.add_row(command, ", ".join(aliases) if aliases else "—", summaries[command])
         console.print(table)
         console.print("[bold cyan]Quick start[/]")
-        console.print("  [green]pload n --name data -d \"Data analysis\"[/]")
+        console.print("  [green]pload new -n data -d \"Data analysis\"[/]")
         console.print("  [green]pload ls[/]")
         console.print("  [green]pload v1[/]  [dim]# activate after shell initialization[/]")
     else:

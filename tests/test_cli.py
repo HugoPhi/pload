@@ -45,7 +45,7 @@ def test_shell_init_supports_all_documented_shells():
 def test_shell_init_recognizes_short_command_aliases():
     for shell in ("bash", "zsh", "fish", "powershell"):
         output = shell_script(shell)
-        for alias in ("ls", "n", "i", "py", "p", "cfg"):
+        for alias in ("ls", "i", "py", "p", "cfg"):
             assert alias in output
 
 
@@ -74,7 +74,7 @@ def test_help_describes_python_and_isolation_workflows(capsys):
 
     assert "pload python install 3.12" in output
     assert "PLOAD_HOME" in output
-    assert "--project-dir" in output
+    assert "-P ./app" in output
 
 
 def test_python_list_filter_accepts_comma_or_space_separated_types():
@@ -91,9 +91,25 @@ def test_short_command_aliases_parse_to_supported_commands():
     parser = build_parser()
 
     assert parser.parse_args(["ls"]).command == "ls"
-    assert parser.parse_args(["n", "--name", "demo"]).command == "n"
+    assert parser.parse_args(["new", "-n", "demo"]).command == "new"
     assert parser.parse_args(["py", "ls"]).python_command == "ls"
     assert parser.parse_args(["cfg"]).command == "cfg"
+
+
+def test_simple_commands_have_no_alias_but_long_options_have_short_forms():
+    parser = build_parser()
+
+    assert parser.parse_args(["new", "-n", "demo", "-p", "/tmp/demo"]).name == "demo"
+    assert parser.parse_args(["python", "install", "3.12"]).python_command == "install"
+    assert parser.parse_args(["-H", "/tmp/pload", "-E", "/tmp/venvs", "list"]).home == "/tmp/pload"
+    assert parser.parse_args(["list", "-e", "demo", "-v"]).python_versions is True
+
+    try:
+        parser.parse_args(["n", "-n", "demo"])
+    except SystemExit as error:
+        assert error.code == 2
+    else:
+        raise AssertionError("new must not have a command alias")
 
 
 def test_description_short_option_does_not_conflict_with_detailed_help():
@@ -114,7 +130,7 @@ def test_brief_and_detailed_help_are_distinct(capsys):
     detailed = capsys.readouterr().out
 
     assert "A practical pload walkthrough" in detailed
-    assert "$ pload n --name data" in detailed
+    assert "$ pload new -n data" in detailed
     assert "What changes on disk" in detailed
     assert "PLOAD_HOME/runtime" in detailed
     assert "Related options" in detailed
@@ -130,7 +146,7 @@ def test_command_specific_detailed_help_uses_d_flag(capsys):
     detailed = capsys.readouterr().out
     normalized = " ".join(detailed.split())
     assert "Typical example" in detailed
-    assert "$ pload n --name web" in detailed
+    assert "$ pload new -n web" in detailed
     assert "Assigned v3" in detailed
     assert "Effects and failure behavior" in detailed
     assert "incomplete directory is removed" in normalized
@@ -140,7 +156,7 @@ def test_detailed_help_explains_command_effects(capsys):
     expectations = [
         (["list", "-h", "-d"], "Listing never deletes", "legacy environments"),
         (["rm", "-h", "-d"], "Safety effects", "Refuses to delete"),
-        (["py", "i", "-h", "-d"], "Does not modify /usr/bin", "runtime source"),
+        (["py", "install", "-h", "-d"], "Does not modify /usr/bin", "runtime source"),
         (["py", "ls", "-h", "-d"], "Discovery probes", "does not install"),
         (["cfg", "-h", "-d"], "read-only", "where a new environment"),
     ]

@@ -216,6 +216,11 @@ def _wheel_identity(filename):
 class ArtifactRepository:
     """Content-addressed local and SSH artifact access."""
 
+    SSH_OPTIONS = (
+        "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
+        "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4",
+    )
+
     @staticmethod
     def _local_root(spec, base):
         root = Path(spec["location"]).expanduser()
@@ -225,69 +230,166 @@ class ArtifactRepository:
 
     @classmethod
     def contains(cls, spec, checksum, base):
+        return checksum in cls.contains_many(spec, [checksum], base)
+
+    @classmethod
+    def contains_many(cls, spec, checksums, base):
+        checksums = sorted(set(checksums))
         if spec["kind"] == "local":
-            artifact = cls._local_root(spec, base) / "objects" / checksum
-            return artifact.is_file() and digest(artifact) == checksum
+            root = cls._local_root(spec, base) / "objects"
+            return {
+                checksum for checksum in checksums
+                if (root / checksum).is_file() and digest(root / checksum) == checksum
+            }
         host, root = RepositoryManager.ssh_location(spec["location"])
-        result = execute([
-            "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", host,
-            f"if test -f {shlex.quote(root + '/objects/' + checksum)}; then printf yes; fi",
-        ])
-        return result == "yes"
+        object_root = root + "/objects"
+        checks = "; ".join(
+            f"test -f {shlex.quote(object_root + '/' + checksum)} && printf '%s\\n' "
+            f"{shlex.quote(checksum)} || true"
+            for checksum in checksums
+        )
+        return set(execute(
+            ["ssh", *cls.SSH_OPTIONS, host, checks], timeout=75,
+        ).splitlines())
 
     @classmethod
     def publish(cls, spec, source, checksum, base):
-        source = Path(source)
-        if digest(source) != checksum:
-            raise PloadError("artifact changed before publication")
+        cls.publish_many(spec, [(source, checksum)], base)
+
+    @classmethod
+    def publish_many(cls, spec, artifacts, base):
+        """Publish multiple objects with one SSH query and one transfer."""
+        artifacts = [(Path(source), checksum) for source, checksum in artifacts]
+        if not artifacts:
+            return
+        for source, checksum in artifacts:
+            if digest(source) != checksum:
+                raise PloadError("artifact changed before publication")
         if spec["kind"] == "local":
-            target = cls._local_root(spec, base) / "objects" / checksum
-            target.parent.mkdir(parents=True, exist_ok=True)
-            if target.exists() and digest(target) != checksum:
-                raise PloadError("repository object checksum mismatch")
-            if not target.exists():
-                temporary = target.with_name(target.name + "." + uuid.uuid4().hex)
-                shutil.copyfile(source, temporary)
-                temporary.replace(target)
+            for source, checksum in artifacts:
+                target = cls._local_root(spec, base) / "objects" / checksum
+                target.parent.mkdir(parents=True, exist_ok=True)
+                if target.exists() and digest(target) != checksum:
+                    raise PloadError("repository object checksum mismatch")
+                if not target.exists():
+                    temporary = target.with_name(target.name + "." + uuid.uuid4().hex)
+                    shutil.copyfile(source, temporary)
+                    temporary.replace(target)
             return
         host, root = RepositoryManager.ssh_location(spec["location"])
-        obj = root + "/objects/" + checksum
-        execute(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", host,
-                 f"mkdir -p {shlex.quote(root + '/objects')}"])
-        if not cls.contains(spec, checksum, base):
-            pending = obj + "." + uuid.uuid4().hex
-            execute(["scp", "-q", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
-                     str(source), host + ":" + pending])
-            execute(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", host,
-                     f"mv -n {shlex.quote(pending)} {shlex.quote(obj)}"])
-        remote_hash = execute(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", host,
-                               f"sha256sum {shlex.quote(obj)}"]).split()[0]
-        if remote_hash != checksum:
-            raise PloadError("remote artifact checksum mismatch")
+        checksums = sorted({checksum for _, checksum in artifacts})
+        object_root = root + "/objects"
+        checks = "; ".join(
+            f"test -f {shlex.quote(object_root + '/' + checksum)} && printf '%s\\n' "
+            f"{shlex.quote(checksum)} || true"
+            for checksum in checksums
+        )
+        existing = set(execute(
+            ["ssh", *cls.SSH_OPTIONS, host,
+             f"mkdir -p {shlex.quote(object_root)}; {checks}"],
+            timeout=75,
+        ).splitlines())
+        missing = [(source, checksum) for source, checksum in artifacts
+                   if checksum not in existing]
+        if missing:
+            pending_name = ".upload-" + uuid.uuid4().hex
+            remote_pending = root + "/" + pending_name
+            with tempfile.TemporaryDirectory(prefix="pload-publish-") as temporary:
+                stage = Path(temporary)
+                for source, checksum in missing:
+                    staged = stage / checksum
+                    try:
+                        os.link(source, staged)
+                    except OSError:
+                        shutil.copyfile(source, staged)
+                execute(
+                    ["ssh", *cls.SSH_OPTIONS, host,
+                     f"mkdir -p {shlex.quote(remote_pending)}"],
+                    timeout=75,
+                )
+                execute(
+                    ["scp", "-q", *cls.SSH_OPTIONS,
+                     *[str(stage / checksum) for _, checksum in missing],
+                     host + ":" + remote_pending + "/"],
+                    timeout=300,
+                )
+            commands = []
+            for _, checksum in missing:
+                pending = remote_pending + "/" + checksum
+                target = object_root + "/" + checksum
+                commands.append(
+                    f"test \"$(sha256sum {shlex.quote(pending)} | cut -d' ' -f1)\" = "
+                    f"{shlex.quote(checksum)}"
+                )
+                commands.append(f"mv -n {shlex.quote(pending)} {shlex.quote(target)}")
+                commands.append(f"rm -f {shlex.quote(pending)}")
+            commands.append(f"rmdir {shlex.quote(remote_pending)}")
+            execute(
+                ["ssh", *cls.SSH_OPTIONS, host, " && ".join(commands)],
+                timeout=75,
+            )
+        verify = " && ".join(
+            f"test \"$(sha256sum {shlex.quote(object_root + '/' + checksum)} "
+            f"| cut -d' ' -f1)\" = {shlex.quote(checksum)}"
+            for checksum in checksums
+        )
+        execute(["ssh", *cls.SSH_OPTIONS, host, verify], timeout=75)
 
     @classmethod
     def fetch(cls, spec, checksum, destination, base):
-        destination = Path(destination)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        temporary = destination.with_name(destination.name + "." + uuid.uuid4().hex)
-        if spec["kind"] == "local":
-            shutil.copyfile(cls._local_root(spec, base) / "objects" / checksum, temporary)
-        else:
-            host, root = RepositoryManager.ssh_location(spec["location"])
-            execute(["scp", "-q", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
-                     host + ":" + root + "/objects/" + checksum, str(temporary)])
-        if digest(temporary) != checksum:
-            temporary.unlink(missing_ok=True)
-            raise PloadError("retrieved artifact checksum mismatch")
-        temporary.replace(destination)
+        cls.fetch_many(spec, [(checksum, destination)], base)
 
+    @classmethod
+    def fetch_many(cls, spec, artifacts, base):
+        """Fetch multiple content-addressed objects through one SFTP session."""
+        artifacts = [(checksum, Path(destination)) for checksum, destination in artifacts]
+        if not artifacts:
+            return
+        for _, destination in artifacts:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+        if spec["kind"] == "local":
+            root = cls._local_root(spec, base) / "objects"
+            for checksum, destination in artifacts:
+                temporary = destination.with_name(
+                    destination.name + "." + uuid.uuid4().hex
+                )
+                shutil.copyfile(root / checksum, temporary)
+                if digest(temporary) != checksum:
+                    temporary.unlink(missing_ok=True)
+                    raise PloadError("retrieved artifact checksum mismatch")
+                temporary.replace(destination)
+            return
+        host, root = RepositoryManager.ssh_location(spec["location"])
+        with tempfile.TemporaryDirectory(prefix="pload-fetch-") as temporary:
+            stage = Path(temporary)
+            commands = []
+            for checksum, _ in artifacts:
+                commands.append(
+                    f"get {root}/objects/{checksum} {stage / checksum}"
+                )
+            execute(
+                ["sftp", "-q", "-b", "-", *cls.SSH_OPTIONS, host],
+                timeout=300, input_text="\n".join(commands) + "\n",
+            )
+            for checksum, destination in artifacts:
+                downloaded = stage / checksum
+                if not downloaded.is_file() or digest(downloaded) != checksum:
+                    raise PloadError("retrieved artifact checksum mismatch")
+                temporary_destination = destination.with_name(
+                    destination.name + "." + uuid.uuid4().hex
+                )
+                shutil.copyfile(downloaded, temporary_destination)
+                temporary_destination.replace(destination)
 
 class DeclarativeEnvironmentManager:
     def __init__(self, config):
         self.config = config
         self.cache = config.home / "cache" / "wheels"
 
-    def describe(self, source, output, name=None, mode="exact", repository=None, sources=None):
+    def describe(
+        self, source, output, name=None, mode="exact", repository=None, sources=None,
+        progress=None,
+    ):
         venvs = VenvManager(self.config)
         candidate = Path(source).expanduser()
         if candidate.is_file():
@@ -365,9 +467,15 @@ class DeclarativeEnvironmentManager:
             "package": [],
         }
         self.cache.mkdir(parents=True, exist_ok=True)
+        publication = []
         with tempfile.TemporaryDirectory(prefix="pload-describe-") as temporary:
             wheel_dir = Path(temporary)
-            for installed in packages:
+            for index_number, installed in enumerate(packages, 1):
+                if progress:
+                    progress(
+                        f"[{index_number}/{len(packages)}] Locking "
+                        f"{installed['name']}=={installed['version']}"
+                    )
                 source_name, package_index = source_overrides.get(
                     normalized_name(installed["name"]), ("default", index)
                 )
@@ -387,15 +495,25 @@ class DeclarativeEnvironmentManager:
                         shutil.copyfile(wheel, cached)
                     locations = []
                     if selected_repository:
-                        ArtifactRepository.publish(
-                            repositories[selected_repository], cached, checksum, output.parent,
-                        )
-                        locations.append(selected_repository)
-                    record["artifact"].append({
+                        publication.append((cached, checksum))
+                    artifact = {
                         "filename": wheel.name, "sha256": checksum,
                         "tags": _wheel_tags(wheel.name), "repositories": locations,
-                    })
+                    }
+                    record["artifact"].append(artifact)
                 data["package"].append(record)
+        if selected_repository and publication:
+            if progress:
+                progress(
+                    f"Publishing {len(publication)} locked artifacts to "
+                    f"{selected_repository}"
+                )
+            ArtifactRepository.publish_many(
+                repositories[selected_repository], publication, output.parent,
+            )
+            for package in data["package"]:
+                for artifact in package.get("artifact", []):
+                    artifact["repositories"].append(selected_repository)
         validate_manifest(data)
         output.parent.mkdir(parents=True, exist_ok=True)
         temporary = output.with_name(output.name + ".tmp")
@@ -451,6 +569,22 @@ class DeclarativeEnvironmentManager:
         network_allowed = policy.get("network", "allow") == "allow" and not offline
         repositories = data.get("repositories", {})
         packages = self._locked_packages(data)
+        repository_checksums = {}
+        for package in packages:
+            for artifact in package.get("artifact", []):
+                for repo_name in artifact.get("repositories", []):
+                    if repo_name in repositories:
+                        repository_checksums.setdefault(repo_name, set()).add(
+                            artifact["sha256"]
+                        )
+        repository_objects = {}
+        for repo_name, checksums in repository_checksums.items():
+            try:
+                repository_objects[repo_name] = ArtifactRepository.contains_many(
+                    repositories[repo_name], checksums, path.parent,
+                )
+            except PloadError:
+                repository_objects[repo_name] = set()
         plans = []
         for package in packages:
             candidates = []
@@ -465,17 +599,11 @@ class DeclarativeEnvironmentManager:
                     ))
                 for repo_name in artifact.get("repositories", []):
                     spec = repositories.get(repo_name)
-                    if spec:
-                        try:
-                            available = ArtifactRepository.contains(
-                                spec, artifact["sha256"], path.parent
-                            )
-                        except PloadError:
-                            available = False
-                        if available:
-                            candidates.append(self._candidate(
-                                "repository", repo_name, "remote", (0, 0, 1, repo_name), artifact
-                            ))
+                    if (spec and artifact["sha256"]
+                            in repository_objects.get(repo_name, set())):
+                        candidates.append(self._candidate(
+                            "repository", repo_name, "remote", (0, 0, 1, repo_name), artifact
+                        ))
                 if network_allowed:
                     for source_name in package.get("sources", []):
                         source = data.get("sources", {}).get(source_name)
@@ -528,7 +656,7 @@ class DeclarativeEnvironmentManager:
                            "sources": ["default"], "artifact": []})
         return result
 
-    def apply(self, manifest_path, name=None, offline=False):
+    def apply(self, manifest_path, name=None, offline=False, progress=None):
         path, data = load_manifest(manifest_path)
         plan = self.plan(path, offline=offline)
         unavailable = [item for item in plan["packages"] if not item["selected"]]
@@ -555,9 +683,34 @@ class DeclarativeEnvironmentManager:
         artifacts = []
         compatible = []
         self.cache.mkdir(parents=True, exist_ok=True)
+        repository_fetches = {}
+        for package_plan in plan["packages"]:
+            selected = package_plan["selected"]
+            artifact = selected.get("artifact")
+            if artifact and selected["method"] == "repository":
+                cached = self.cache / artifact["filename"]
+                if not (cached.is_file() and digest(cached) == artifact["sha256"]):
+                    repository_fetches.setdefault(selected["location"], []).append(
+                        (artifact["sha256"], cached)
+                    )
+        for repo_name, fetches in repository_fetches.items():
+            if progress:
+                progress(f"Fetching {len(fetches)} artifacts from {repo_name}")
+            try:
+                ArtifactRepository.fetch_many(
+                    data["repositories"][repo_name], fetches, path.parent,
+                )
+            except PloadError as exc:
+                if progress:
+                    progress(f"Batch fetch failed; trying fallback routes: {exc}")
         with tempfile.TemporaryDirectory(prefix="pload-apply-") as temporary:
             stage = Path(temporary)
-            for package_plan in plan["packages"]:
+            for index_number, package_plan in enumerate(plan["packages"], 1):
+                if progress:
+                    progress(
+                        f"[{index_number}/{len(plan['packages'])}] Preparing "
+                        f"{package_plan['name']}=={package_plan['version']}"
+                    )
                 selected = package_plan["selected"]
                 artifact = selected.get("artifact")
                 if artifact:
@@ -590,6 +743,8 @@ class DeclarativeEnvironmentManager:
                 else:
                     compatible.append(package_plan)
             venvs = VenvManager(self.config)
+            if progress:
+                progress(f"Creating environment {target_name}")
             env = venvs.create_venv(
                 version=str(interpreter), name=target_name,
                 description=f"Applied from {path.name}",
@@ -620,6 +775,8 @@ class DeclarativeEnvironmentManager:
                 execute(pip + ["install", "--no-index", "--no-deps", "-r",
                                str(requirements)])
                 execute(pip + ["check"], capture=False)
+                if progress:
+                    progress("Verified exact requirements and dependency consistency")
                 (env / ".pload-manifest.sha256").write_text(
                     expected_state + "\n", encoding="utf-8"
                 )

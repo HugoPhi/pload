@@ -50,9 +50,14 @@ print(json.dumps({'python': platform.python_version(),
 """
 
 
-def execute(command, capture=True, cwd=None):
+def execute(command, capture=True, cwd=None, timeout=None, input_text=None):
     try:
-        result = subprocess.run(command, capture_output=capture, text=True, cwd=cwd, check=False)
+        result = subprocess.run(
+            command, capture_output=capture, text=True, cwd=cwd, check=False,
+            timeout=timeout, input=input_text,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise PloadError(f"{command[0]} timed out after {timeout} seconds") from exc
     except OSError as exc:
         raise PloadError(f"cannot run {command[0]}: {exc}") from exc
     if result.returncode:

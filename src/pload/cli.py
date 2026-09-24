@@ -744,9 +744,13 @@ def run(argv=None):
 
         manager = DeclarativeEnvironmentManager(config)
         if command == "describe":
+            progress_console = Console(highlight=False)
             print(manager.describe(
                 args.source, args.output, args.name, args.mode, args.repository,
                 args.package_sources,
+                progress=lambda message: progress_console.print(
+                    Text("• " + message, style="cyan")
+                ),
             ))
         elif command == "plan":
             plan = manager.plan(args.file, args.offline)
@@ -755,7 +759,13 @@ def run(argv=None):
             else:
                 print_declarative_plan(plan)
         else:
-            print(manager.apply(args.file, args.name, args.offline))
+            progress_console = Console(highlight=False)
+            print(manager.apply(
+                args.file, args.name, args.offline,
+                progress=lambda message: progress_console.print(
+                    Text("• " + message, style="cyan")
+                ),
+            ))
         return 0
 
     if command == "new":

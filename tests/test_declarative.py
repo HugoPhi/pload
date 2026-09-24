@@ -121,9 +121,11 @@ def test_describe_plan_apply_through_content_repository(tmp_path):
     manager = DeclarativeEnvironmentManager(source_config)
     manager.cache.mkdir(parents=True)
     shutil.copyfile(wheel, manager.cache / wheel.name)
+    describe_progress = []
     manifest = manager.describe(
         "source", tmp_path / "pload.toml", name="restored",
         sources=["pload-demo=https://download.example.invalid/cu121"],
+        progress=describe_progress.append,
     )
     _, data = load_manifest(manifest)
     artifact = data["package"][0]["artifact"][0]
@@ -132,6 +134,8 @@ def test_describe_plan_apply_through_content_repository(tmp_path):
     assert data["sources"]["package-pload-demo"]["url"].endswith("/cu121")
     assert artifact["repositories"] == ["lab"]
     assert (repository / "objects" / artifact["sha256"]).is_file()
+    assert any("Locking pload-demo==1.0" in item for item in describe_progress)
+    assert any("Publishing 1 locked artifact" in item for item in describe_progress)
 
     shutil.rmtree(source_config.home / "cache")
     target_config = ConfigManager(home=tmp_path / "target-home")
@@ -139,12 +143,15 @@ def test_describe_plan_apply_through_content_repository(tmp_path):
     target = DeclarativeEnvironmentManager(target_config)
     plan = target.plan(manifest)
     assert plan["packages"][0]["selected"]["method"] == "repository"
-    restored = target.apply(manifest)
+    apply_progress = []
+    restored = target.apply(manifest, progress=apply_progress.append)
     output = execute([target_config.get_pip_command(restored)[0], "-c",
                       "import pload_demo; print(pload_demo.answer)"])
     assert output == "42"
     assert target.apply(manifest) == restored
     assert digest(target.cache / artifact["filename"]) == artifact["sha256"]
+    assert any("Preparing pload-demo==1.0" in item for item in apply_progress)
+    assert any("Verified exact requirements" in item for item in apply_progress)
 
 
 def test_apply_rolls_back_a_new_environment_after_install_failure(tmp_path):

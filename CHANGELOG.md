@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-Pre-release: `1.1.0a2`
+Pre-release: `1.1.0a3`
 
 ### Added
 
@@ -26,6 +26,10 @@ Pre-release: `1.1.0a2`
 
 - Keep an external environment's interpreter path intact when probing packages,
   instead of following its Python symlink out to the base installation.
+- Batch SSH repository inventory, publication and retrieval so environments with
+  several packages do not spend most of their time reconnecting. Show package
+  and transfer progress, enforce bounded SSH/SFTP operations, and report actual
+  transfer timeouts instead of appearing frozen.
 
 ## 1.0.0 - 2026-09-24
 

@@ -21,7 +21,7 @@ from pload.managers.venv import VenvManager
 from pload.settings import save_settings
 
 PROBE = """
-import json, platform, sys, os
+import json, platform, sys, os, shutil, subprocess
 from importlib import metadata
 packages = []
 for dist in metadata.distributions():
@@ -29,10 +29,24 @@ for dist in metadata.distributions():
     if name and name.lower() not in ('pip', 'setuptools', 'wheel'):
         packages.append({'name': name, 'version': dist.version,
                          'direct_url': dist.read_text('direct_url.json')})
+accelerators = []
+nvidia_smi = shutil.which('nvidia-smi')
+if nvidia_smi:
+    try:
+        result = subprocess.run([nvidia_smi, '--query-gpu=driver_version',
+                                 '--format=csv,noheader'], capture_output=True, text=True,
+                                timeout=5)
+        if result.returncode == 0:
+            versions = sorted(set(line.strip() for line in result.stdout.splitlines()
+                                  if line.strip()))
+            accelerators.append({'kind': 'nvidia', 'driver_versions': versions})
+    except (OSError, subprocess.SubprocessError):
+        pass
 print(json.dumps({'python': platform.python_version(),
  'implementation': sys.implementation.name, 'system': platform.system(),
  'machine': platform.machine(), 'libc': list(platform.libc_ver()),
- 'conda': os.path.isdir(os.path.join(sys.prefix, 'conda-meta')), 'packages': packages}))
+ 'conda': os.path.isdir(os.path.join(sys.prefix, 'conda-meta')),
+ 'accelerators': accelerators, 'packages': packages}))
 """
 
 

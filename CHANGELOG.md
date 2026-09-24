@@ -2,17 +2,25 @@
 
 ## Unreleased
 
+Pre-release: `1.1.0a2`
+
 ### Added
 
-- Export exact package snapshots from managed and external Python environments,
-  with optional selected/all wheel bundles and checksums.
-- Restore snapshots offline, explicitly re-resolve for another platform, or
-  import trusted requirements files into new environments.
-- Configure local, SSH and Git recipe repositories; push and pull immutable snapshots.
-- Reuse local wheel archives and pip caches, deduplicate SSH wheel storage by SHA-256,
-  and avoid re-downloading identical cached wheels during pull.
-- Document interoperability boundaries, GPU/native dependencies, source-wheel
-  provenance and repository trust requirements.
+- Make one portable `pload.toml` the source of truth for desired Python,
+  exact dependencies, policies, repositories and locked artifact hashes.
+- Add `pload describe`, `pload plan` and idempotent `pload apply`; resource
+  copying, downloading and publication are internal planner/executor steps.
+- Inventory the local wheel cache, adjacent artifacts, local/SSH content stores,
+  configured indexes and Python installations before choosing a route.
+- Allow package-specific indexes in `describe`, including CUDA wheel indexes,
+  while keeping credentials out of the portable configuration.
+- Reuse exact wheel archives by SHA-256, deduplicate local/SSH storage, record
+  detected NVIDIA driver provenance and roll back failed materializations.
+
+### Removed
+
+- Drop the unreleased transport-oriented `export`, `restore`, and repository
+  push/pull interface in favor of the declarative configuration workflow.
 
 ### Fixed
 

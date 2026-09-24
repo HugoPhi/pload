@@ -5,7 +5,7 @@ import zipfile
 
 import pytest
 
-from pload.cli import build_parser, main, shell_script
+from pload.cli import main, shell_script
 from pload.errors import PloadError
 from pload.managers.platform import ConfigManager
 from pload.managers.venv import VenvManager
@@ -130,12 +130,11 @@ def test_git_recipe_roundtrip(tmp_path, monkeypatch):
 
 
 def test_commands_and_shell_integration(capsys):
-    assert build_parser().parse_args(["export", "example", "-b", "all"]).bundle == "all"
-    for command in ("export", "restore", "repo"):
+    for command in ("repo",):
         assert main([command, "-h"]) == 0
         for shell in ("bash", "zsh", "fish", "powershell"):
             assert command in shell_script(shell)
-    assert "--bundle" in capsys.readouterr().out
+    assert "artifact providers" in capsys.readouterr().out
 
 
 def test_repository_list_alias(tmp_path, capsys):

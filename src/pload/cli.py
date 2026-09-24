@@ -28,8 +28,9 @@ COMMAND_ALIASES = {
     "shell-init": ("shell",),
     "python": ("py",),
     "config": ("cfg",),
-    "export": (),
-    "restore": (),
+    "describe": (),
+    "plan": (),
+    "apply": (),
     "repo": (),
 }
 PYTHON_ALIASES = {
@@ -279,43 +280,52 @@ Aliases: system=sys, managed=uv""",
     )
     config.add_argument("key", nargs="?", help="setting name for `config set`")
     config.add_argument("value", nargs="?", help="new value for `config set`")
-    export = subparsers.add_parser(
-        "export", description="Save exact package pins and optional platform-specific wheels.",
-        help="snapshot an existing environment",
+    describe = subparsers.add_parser(
+        "describe", description="Describe an existing environment as one portable configuration.",
+        help="create pload.toml from an existing environment",
     )
-    export.add_argument("name", help="new immutable snapshot name")
-    source = export.add_mutually_exclusive_group()
-    source.add_argument("--environment", "-e", help="environment ID, name or path (default: .venv)")
-    source.add_argument("--python", "-p", help="external interpreter, including uv/Conda/Poetry")
-    export.add_argument("--bundle", "-b", help="all or comma-separated packages to archive as wheels")
-    export.add_argument("--index-url", "-i", help="index used to download wheels, e.g. PyTorch CUDA")
-    export.add_argument("--find-links", "-f", action="append", help="existing wheel directory; repeatable")
-    restore = subparsers.add_parser(
-        "restore", description="Create a new environment from a snapshot or trusted requirements file.",
-        help="restore a snapshot or requirements.txt",
+    describe.add_argument("source", help="environment ID, name, path, or Python executable")
+    describe.add_argument("--output", "-o", default="pload.toml",
+                          help="configuration file to write (default: pload.toml)")
+    describe.add_argument("--name", "-n", help="logical environment name")
+    describe.add_argument("--mode", "-m", choices=["exact", "compatible"], default="exact",
+                          help="lock exact artifacts or permit re-resolution (default: exact)")
+    describe.add_argument("--repository", "-r",
+                          help="artifact repository; defaults to the first configured local/SSH repo")
+    describe.add_argument(
+        "--source", "-s", dest="package_sources", action="append", default=[],
+        metavar="PACKAGE=URL",
+        help="package-specific index; repeat for packages such as CUDA-enabled torch",
     )
-    restore.add_argument("source", help="snapshot name/directory or requirements.txt path")
-    restore.add_argument("--name", "-n", required=True, help="name of the new environment")
-    restore.add_argument("--version", "-v", help="Python ID, version or interpreter path")
-    restore.add_argument("--offline", "-o", action="store_true", help="install only from local wheels")
-    restore.add_argument("--portable", "-p", action="store_true",
-                         help="resolve pins for another platform; ignore bundled wheels")
-    restore.add_argument("--index-url", "-i", help="package index for online restoration")
-    repo = subparsers.add_parser("repo", help="manage snapshot repositories",
-                                 description="Manage local, SSH and Git snapshot repositories.")
+    plan = subparsers.add_parser(
+        "plan", description="Compare a declarative environment with all available resources.",
+        help="explain how pload would satisfy a configuration",
+    )
+    plan.add_argument("file", nargs="?", default="pload.toml",
+                      help="environment configuration (default: pload.toml)")
+    plan.add_argument("--offline", "-o", action="store_true",
+                      help="plan using only resources available without the internet")
+    plan.add_argument("--json", "-j", action="store_true", help="emit machine-readable JSON")
+    apply = subparsers.add_parser(
+        "apply", description="Materialize the desired environment from available resources.",
+        help="create or verify an environment from pload.toml",
+    )
+    apply.add_argument("file", nargs="?", default="pload.toml",
+                       help="environment configuration (default: pload.toml)")
+    apply.add_argument("--name", "-n", help="override the materialized environment name")
+    apply.add_argument("--offline", "-o", action="store_true",
+                       help="forbid internet access; configured local/SSH repositories remain usable")
+    repo = subparsers.add_parser("repo", help="manage resource providers",
+                                 description="Manage local and SSH artifact providers.")
     actions = repo.add_subparsers(dest="repo_command", required=True)
     add = actions.add_parser("add", description="Save a repository location; no credentials stored.")
     add.add_argument("name", help="repository nickname")
-    add.add_argument("location", help="directory, HOST:/absolute/path, or Git URL")
-    add.add_argument("--type", "-t", choices=["local", "ssh", "git"], default="local",
+    add.add_argument("location", help="directory or HOST:/absolute/path")
+    add.add_argument("--type", "-t", choices=["local", "ssh"], default="local",
                      help="transport (default: local)")
     actions.add_parser("list", aliases=["ls"], description="Show configured repositories.")
     remove = actions.add_parser("remove", description="Remove configuration, keeping all remote files.")
     remove.add_argument("name", help="repository nickname")
-    for verb in ("push", "pull"):
-        action = actions.add_parser(verb, description=f"{verb.title()} a complete immutable snapshot.")
-        action.add_argument("repository", help="configured repository nickname")
-        action.add_argument("snapshot", help="snapshot name")
     return parser
 
 
@@ -433,6 +443,31 @@ def _global_options_table(root_parser):
     return table
 
 
+def print_declarative_plan(plan):
+    console = Console(highlight=False)
+    python = plan["python"]
+    console.print(Panel.fit(
+        f"[bold]{plan['name']}[/]\nPython: [cyan]{python['method']}[/] · {python['location']}",
+        title="[bold cyan]Environment plan[/]",
+        border_style="blue",
+    ))
+    table = Table(box=box.ROUNDED, header_style="bold cyan", border_style="blue")
+    table.add_column("PACKAGE", style="bold green", no_wrap=True)
+    table.add_column("VERSION", style="yellow", no_wrap=True)
+    table.add_column("METHOD", style="cyan", no_wrap=True)
+    table.add_column("STATUS", no_wrap=True)
+    table.add_column("RESOURCE")
+    for package in plan["packages"]:
+        selected = package["selected"]
+        if selected:
+            table.add_row(package["name"], package["version"], selected["method"],
+                          selected["status"], selected["location"])
+        else:
+            table.add_row(package["name"], package["version"], "—", "unavailable",
+                          "No resource satisfies the configuration")
+    console.print(table)
+
+
 def _print_spaced_section(console, renderable):
     """Give a standalone section consistent visual breathing room."""
     console.print()
@@ -503,9 +538,10 @@ def _brief_help(parser, command_path, root_parser=None):
             "path": "Print an environment path",
             "config": "Show effective configuration",
             "shell-init": "Print shell activation integration",
-            "export": "Save a package snapshot and optional wheels",
-            "restore": "Recreate a snapshot or requirements file",
-            "repo": "Manage local, SSH and Git repositories",
+            "describe": "Write one portable configuration for an existing environment",
+            "plan": "Compare a configuration with available resources",
+            "apply": "Materialize the environment declared by pload.toml",
+            "repo": "Manage local and SSH artifact providers",
         }
         for command, summary in summaries.items():
             aliases = COMMAND_ALIASES[command]
@@ -584,6 +620,8 @@ def render_landing():
     table.add_column("WHAT IT DOES")
     table.add_row("pload cfg", "Show where pload stores its data")
     table.add_row("pload python list", "Find every usable Python interpreter")
+    table.add_row("pload describe v1", "Describe an environment in pload.toml")
+    table.add_row("pload apply", "Create exactly what pload.toml declares")
     table.add_row("pload new", "Open guided environment creation")
     table.add_row("pload new -n data -v 3.12", "Create a named virtual environment")
     table.add_row("pload list", "List environments, IDs, and descriptions")
@@ -597,7 +635,7 @@ def shell_script(shell):
     if shell in {"bash", "zsh"}:
         return r'''pload() {
     case "${1:-}" in
-        ""|new|init|i|rm|remove|del|delete|list|ls|path|p|shell-init|shell|python|py|config|cfg|export|restore|repo|-*)
+        ""|new|init|i|rm|remove|del|delete|list|ls|path|p|shell-init|shell|python|py|config|cfg|describe|plan|apply|repo|-*)
             command pload "$@"
             ;;
         *)
@@ -610,7 +648,7 @@ def shell_script(shell):
     if shell == "fish":
         return r'''function pload
     switch "$argv[1]"
-        case '' new init i rm remove del delete list ls path p shell-init shell python py config cfg export restore repo '-*'
+        case '' new init i rm remove del delete list ls path p shell-init shell python py config cfg describe plan apply repo '-*'
             command pload $argv
         case '*'
             set -l name .
@@ -624,7 +662,7 @@ def shell_script(shell):
 end'''
     return r'''function pload {
     param([Parameter(ValueFromRemainingArguments = $true)][string[]]$PloadArgs)
-    $commands = @('new', 'init', 'i', 'rm', 'remove', 'del', 'delete', 'list', 'ls', 'path', 'p', 'shell-init', 'shell', 'python', 'py', 'config', 'cfg', 'export', 'restore', 'repo', '-h', '--help', '--version')
+    $commands = @('new', 'init', 'i', 'rm', 'remove', 'del', 'delete', 'list', 'ls', 'path', 'p', 'shell-init', 'shell', 'python', 'py', 'config', 'cfg', 'describe', 'plan', 'apply', 'repo', '-h', '--help', '--version')
     $backend = Get-Command -Name @('pload.exe', 'pload.cmd') -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $backend) { throw 'pload executable not found on PATH' }
     if ($PloadArgs.Count -eq 0) {
@@ -690,27 +728,34 @@ def run(argv=None):
     venvs = VenvManager(config)
     dependencies = DependencyManager(config)
 
-    if command in {"export", "restore", "repo"}:
-        from pload.snapshots import RepositoryManager, SnapshotManager
+    if command in {"describe", "plan", "apply", "repo"}:
+        if command == "repo":
+            from pload.snapshots import RepositoryManager
 
-        snapshots = SnapshotManager(config)
-        if command == "export":
-            print(snapshots.export(args.name, args.environment, args.python, args.bundle,
-                                   args.index_url, args.find_links))
-        elif command == "restore":
-            print(snapshots.restore(args.source, args.name, args.version,
-                                    args.offline, args.portable, args.index_url))
-        else:
             repositories = RepositoryManager(config)
             if args.repo_command == "add":
                 repositories.add(args.name, args.location, args.type)
             elif args.repo_command == "remove":
                 repositories.remove(args.name)
-            elif args.repo_command in {"list", "ls"}:
-                print(json.dumps(repositories.repositories(), indent=2))
             else:
-                repositories.transfer(args.repository, args.snapshot, args.repo_command == "push")
-                print(f"[*] {args.repo_command}: {args.snapshot} ({args.repository})")
+                print(json.dumps(repositories.repositories(), indent=2))
+            return 0
+        from pload.declarative import DeclarativeEnvironmentManager
+
+        manager = DeclarativeEnvironmentManager(config)
+        if command == "describe":
+            print(manager.describe(
+                args.source, args.output, args.name, args.mode, args.repository,
+                args.package_sources,
+            ))
+        elif command == "plan":
+            plan = manager.plan(args.file, args.offline)
+            if args.json:
+                print(json.dumps(plan, ensure_ascii=False, indent=2))
+            else:
+                print_declarative_plan(plan)
+        else:
+            print(manager.apply(args.file, args.name, args.offline))
         return 0
 
     if command == "new":

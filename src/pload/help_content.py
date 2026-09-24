@@ -50,6 +50,19 @@ does not replace the operating system Python.
 - project-local `pload init` environments may live outside the managed root.
 
 Use `pload cfg` to see the exact effective paths before creating anything.
+
+## Reproduce an environment from one file
+
+```console
+$ pload describe v1 -o pload.toml
+$ pload plan pload.toml
+$ pload apply pload.toml
+```
+
+The TOML file describes the desired Python, exact packages, platform, policies,
+artifact hashes, indexes and logical artifact providers. `apply` inventories the
+current machine and automatically reuses, copies or downloads the best valid
+resources; users do not perform separate upload, download or migration steps.
 """,
     ("new",): r"""
 # Create a managed environment
@@ -331,72 +344,74 @@ selected shell profile. It does not reinstall pload or uv.
 }
 
 
-GUIDES[("export",)] = r"""
-# Save a reproducible package snapshot
+GUIDES[("describe",)] = r"""
+# Turn an existing environment into one portable configuration
 
 ```console
-pload export analysis-01 -e v1
-pload export analysis-offline -p /path/to/project/.venv/bin/python -b all
-pload export training-01 -e v2 -b torch -f /mnt/downloaded-wheels
+pload describe v2
+pload describe /project/.venv -o project.pload.toml
+pload describe /project/.venv/bin/python -n project -r lab
+pload describe v2 -s torch=https://download.pytorch.org/whl/cu121
 ```
 
-The first command records exact installed versions and interpreter/platform metadata
-under `PLOAD_HOME/snapshots/analysis-01`. Its requirements.txt also works with pip
-and uv. The second adds every package's wheel for offline restoration. The third
-archives only torch, so other packages still come from your package index.
-Use `-i URL` to select a dedicated wheel index, such as your PyTorch CUDA index.
-Existing shared wheels are tried offline first; then pip uses its normal caches.
+The default exact mode locks every installed application package to an actual
+wheel and SHA-256. pload reuses its local cache, downloads a missing wheel when
+necessary, and publishes it to the selected configured local/SSH repository.
+These are internal resource operations: the user receives one TOML file.
 
-Names are immutable: export a new name for a new revision. Source checkouts and
-editable installs must first be built and installed as wheels. Direct-wheel installs
-need their original archive in `-f DIR` or the shared cache and inclusion in `-b`;
-the archive hash must match the installation metadata. Native Conda environments require Conda's own
-export tools. Python itself, OS libraries and GPU drivers are not bundled.
+Use `--mode compatible` only when exact wheels do not exist and future
+re-resolution is acceptable. Native Conda packages are not silently converted.
+Credentials and URL query tokens are never written into the portable file.
+Use repeatable `--source PACKAGE=URL` options when an installed package came from
+a dedicated index that cannot be inferred reliably from installed metadata.
 """
-GUIDES[("restore",)] = r"""
-# Restore into a new environment
+GUIDES[("plan",)] = r"""
+# Explain how the desired state can be satisfied
 
 ```console
-pload restore analysis-offline -n analysis-copy -o
-pload restore analysis-01 -n linux-copy -p
-pload restore ./requirements.txt -n imported -v 3.12
+pload plan
+pload plan project.pload.toml
+pload plan --offline
+pload plan --json
 ```
 
-`-o` uses a complete wheel snapshot without a package index. SHA-256 checks run
-before creating the environment; wheel compatibility is checked by pip. The Python
-major/minor version must match and must already be installed.
-`-p` deliberately re-resolves the pinned versions for another platform. It is not
-a promise of an identical environment and cannot be combined with offline mode.
-Only import requirements files and repositories you trust: installing packages
-can execute code. Exported index provenance is informational; choose the restore
-index explicitly with `-i URL` when your configured index cannot supply a package.
+Planning reads the configuration, discovers Python interpreters and checks local
+caches, adjacent artifacts, content-addressed repositories and declared indexes.
+Incompatible resources are rejected first; valid routes are ordered by exactness,
+compatibility risk, transfer, execution cost and a deterministic tie-breaker.
+Planning is optional transparency: normal users can go directly to `pload apply`.
+"""
+GUIDES[("apply",)] = r"""
+# Materialize the configuration
 
-The target name must be unused. A failed install leaves that new environment for
-inspection or removal with `pload rm`. Existing environments are never updated.
+```console
+pload apply
+pload apply project.pload.toml -n project-copy
+pload apply --offline
+```
+
+Apply resolves or installs Python, obtains exact artifacts through the selected
+resource routes, verifies hashes, creates the environment, installs packages and
+runs `pip check`. Upload, download and copying are internal plan steps rather than
+separate user commands. Reapplying the same configuration is idempotent; an
+existing environment with different state is never silently overwritten.
 """
 GUIDES[("repo",)] = r"""
-# Store recipes and reusable wheels on your own infrastructure
+# Configure reusable artifact providers
 
 ```console
 pload repo add lab frpxiaoxin:/home/tibless/pload-cloud -t ssh
-pload repo push lab analysis-offline
-pload repo pull lab analysis-offline
-pload restore analysis-offline -n analysis-copy -o
-pload repo add recipes git@github.com:YOUR-NAME/pload-recipes.git -t git
-pload repo push recipes analysis-01
+pload repo add disk /mnt/shared/pload -t local
 pload repo list
 pload repo remove lab
 ```
 
-Pull on another machine (or into a different PLOAD_HOME): existing snapshots are
-not overwritten. SSH uses your OpenSSH alias/keys and a Linux directory; no web
-server or extra Python package is required. Identical wheels are stored once by
-hash on the server and reused from the local cache on pull.
-Git repositories store recipes only; use SSH or a local directory for wheel bundles.
-Git authentication and commit identity come from your existing Git configuration.
-Removing a repository only forgets its configuration; remote data remains intact.
+`describe` embeds configured local/SSH providers in `pload.toml`; `apply` uses them
+automatically. SSH relies on OpenSSH aliases, keys and agents and stores no password.
+Objects are addressed by SHA-256 so identical large wheels are stored only once.
+Removing a provider forgets its configuration but does not delete remote data.
 """
-for _command in ("add", "list", "remove", "push", "pull"):
+for _command in ("add", "list", "remove"):
     GUIDES[("repo", _command)] = GUIDES[("repo",)]
 
 

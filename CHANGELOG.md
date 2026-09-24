@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.3 - 2026-09-24
+
+### Added
+
+- Add `pload cfg set KEY VALUE` for changing one setting without reinstalling.
+- Add `pload cfg -t` to reopen the colored interactive setup wizard later.
+- Reuse the same guided configuration flow during initial installation and
+  later reconfiguration.
+
 ## 0.8.2 - 2026-09-24
 
 ### Changed

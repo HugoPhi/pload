@@ -215,6 +215,37 @@ def test_list_assigns_id_and_shows_description(tmp_path, capsys):
     assert "Data analysis" in output
 
 
+def test_config_set_updates_one_value_without_reinstalling(tmp_path, capsys):
+    home = tmp_path / "home"
+    result = main(["-H", str(home), "cfg", "set", "source", "ustc"])
+
+    assert result == 0
+    assert "Updated configuration" in capsys.readouterr().out
+    from pload.settings import load_settings
+
+    assert load_settings(home)["python"]["source"] == "ustc"
+
+
+def test_config_set_rejects_unknown_setting(tmp_path, capsys):
+    result = main(["-H", str(tmp_path / "home"), "cfg", "set", "unknown", "value"])
+
+    assert result == 1
+    assert "unknown setting" in capsys.readouterr().err
+
+
+def test_config_interactive_reuses_defaults_without_reinstalling(tmp_path, monkeypatch, capsys):
+    answers = iter(["", "", "", "", "", "2", ""])
+    monkeypatch.setattr("builtins.input", lambda prompt: next(answers))
+
+    result = main(["-H", str(tmp_path / "home"), "cfg", "-t"])
+
+    assert result == 0
+    assert "Wrote configuration" in capsys.readouterr().out
+    from pload.settings import load_settings
+
+    assert load_settings(tmp_path / "home")["shell"] == "none"
+
+
 def test_path_resolves_environment_id(tmp_path, capsys):
     home = tmp_path / "home"
     environment = tmp_path / "environments" / "demo"

@@ -289,6 +289,37 @@ $ pload cfg
 The output combines saved configuration, command-line overrides, and relevant
 environment variables. It is read-only and is the quickest way to verify where
 a new environment, Python runtime, cache, or registry will be written.
+
+## Change one value without reinstalling
+
+```console
+$ pload cfg set source ustc
+[*] Updated configuration: /home/me/.pload/config.json
+
+$ pload cfg set pip-source tsinghua
+$ pload cfg set venvs-dir /mnt/venvs
+```
+
+`set` changes only `config.json`; it does not reinstall pload, uv, or existing
+virtual environments. Use `pload cfg` afterwards to verify the result.
+
+## Reopen the guided setup
+
+```console
+$ pload cfg -t
+pload guided setup
+? pload home [/home/me/.pload]:
+? managed virtual environment directory [/home/me/.pload/venvs]: /mnt/venvs
+? Choose the Python runtime download source
+  1) official (default)
+  2) ustc
+Enter a number [1]: 2
+[*] Wrote configuration: /home/me/.pload/config.json
+```
+
+The wizard reuses current values as defaults, lets you review each storage,
+mirror, package-index, and shell choice, and updates only configuration and the
+selected shell profile. It does not reinstall pload or uv.
 """,
 }
 

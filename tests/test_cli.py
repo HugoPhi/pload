@@ -184,6 +184,16 @@ def test_brief_help_starts_with_highlighted_usage_for_aliases(capsys):
     assert output.splitlines()[0].startswith("usage: pload cfg")
 
 
+def test_no_arguments_show_welcome_and_simple_usage(capsys):
+    assert main([]) == 0
+    output = capsys.readouterr().out
+
+    assert "pload" in output
+    assert "Simple usage" in output
+    assert "pload new -n data -v 3.12" in output
+    assert "pload -h -d" in output
+
+
 def test_detailed_help_explains_command_effects(capsys):
     expectations = [
         (["list", "-h", "-d"], "Listing never deletes", "legacy environments"),

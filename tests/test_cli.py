@@ -26,6 +26,7 @@ def test_path_prints_activation_script(tmp_path, capsys):
     activate.touch()
 
     result = main([
+        "--state-dir", str(tmp_path / "state"),
         "--venvs-dir", str(tmp_path / "environments"),
         "path", "demo", "--shell", "bash",
     ])
@@ -50,6 +51,7 @@ def test_remove_refuses_environment_symlink(tmp_path, capsys):
     (managed / "linked").symlink_to(target, target_is_directory=True)
 
     result = main([
+        "--state-dir", str(tmp_path / "state"),
         "--venvs-dir", str(managed), "rm", "linked", "--yes",
     ])
 

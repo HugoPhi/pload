@@ -352,8 +352,12 @@ def test_plan_relocks_when_new_dependency_makes_existing_lock_stale(tmp_path, mo
         return ""
 
     monkeypatch.setattr(declarative_module, "execute", fake_resolver)
-    plan = manager.plan(manifest)
+    progress = []
+    plan = manager.plan(manifest, progress=progress.append)
     assert len(calls) == 1
+    assert progress == [
+        f"Configuration changed; resolving dependencies for Python {platform.python_version()}"
+    ]
     assert plan["lock"]["requested"] == ["pload-demo==1.0", "extra-demo"]
     assert plan["lock"]["resolved"] == ["extra-demo==1.0", "pload-demo==1.0"]
     _, configuration = load_manifest(manifest)

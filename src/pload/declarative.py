@@ -730,6 +730,7 @@ class DeclarativeEnvironmentManager:
 
     def _lock_requested_dependencies(
         self, path, data, lock_current=False, legacy=False, offline=False,
+        progress=None,
     ):
         requested = list(data["environment"].get("dependencies", []))
         if not requested:
@@ -805,6 +806,11 @@ class DeclarativeEnvironmentManager:
             for source_name in source_names[1:]:
                 command += ["--extra-index-url", sources[source_name]["url"]]
             try:
+                if progress:
+                    progress(
+                        "Configuration changed; resolving dependencies for Python "
+                        f"{data['environment']['python']}"
+                    )
                 execute(command + requested)
             except PloadError as exc:
                 raise PloadError(
@@ -874,10 +880,11 @@ class DeclarativeEnvironmentManager:
         temporary.write_text(dump_lock(path, data), encoding="utf-8")
         temporary.replace(destination)
 
-    def plan(self, manifest_path, offline=False):
+    def plan(self, manifest_path, offline=False, progress=None):
         path, data, current, legacy = self._load_state(manifest_path)
         lock = self._lock_requested_dependencies(
             path, data, lock_current=current, legacy=legacy, offline=offline,
+            progress=progress,
         )
         policy = data["policy"]
         network_allowed = policy.get("network", "allow") == "allow" and not offline
@@ -908,6 +915,8 @@ class DeclarativeEnvironmentManager:
                         )
         repository_objects = {}
         for repo_name, checksums in repository_checksums.items():
+            if progress:
+                progress(f"Checking artifact repository {repo_name}")
             try:
                 repository_objects[repo_name] = ArtifactRepository.contains_many(
                     repositories[repo_name], checksums, path.parent,

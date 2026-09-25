@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-Pre-release: `1.1.0a8`
+Pre-release: `1.1.0a9`
 
 ### Added
 
@@ -30,6 +30,9 @@ Pre-release: `1.1.0a8`
   uses the complete requested set and prefers existing pload cache wheels.
 - Migrate lock tables embedded by earlier 1.1 previews into `.pload_lock.toml`
   without another dependency resolution or artifact download.
+- Show an animated planning status immediately, including dependency-resolution
+  and artifact-repository phases, instead of appearing frozen while pip or SSH
+  work is captured in the background.
 
 ### Removed
 

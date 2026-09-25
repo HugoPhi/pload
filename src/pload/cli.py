@@ -766,10 +766,21 @@ def run(argv=None):
                 ),
             ))
         elif command == "plan":
-            plan = manager.plan(args.file, args.offline)
             if args.json:
+                plan = manager.plan(args.file, args.offline)
                 print(json.dumps(plan, ensure_ascii=False, indent=2))
             else:
+                progress_console = Console(highlight=False, stderr=True)
+                with progress_console.status(
+                    "[cyan]Reading configuration and available resources…[/]",
+                    spinner="dots",
+                ) as status:
+                    plan = manager.plan(
+                        args.file, args.offline,
+                        progress=lambda message: status.update(
+                            f"[cyan]{message}…[/]"
+                        ),
+                    )
                 print_declarative_plan(plan)
         else:
             progress_console = Console(highlight=False)

@@ -114,7 +114,7 @@ pload-install --yes --package-spec "pload==1.0.0"
 To opt into the declarative-environment pre-release for testing:
 
 ```console
-pload-install --yes --package-spec "pload==1.1.0a8"
+pload-install --yes --package-spec "pload==1.1.0a9"
 ```
 
 To always follow the newest published release instead of pinning a version,

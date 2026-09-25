@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-Pre-release: `1.1.0a6`
+Pre-release: `1.1.0a7`
 
 ### Added
 
@@ -25,6 +25,9 @@ Pre-release: `1.1.0a6`
 - Accept unpinned dependency intentions such as `numpy` and `pandas>=2`; the
   first online plan resolves the complete wheel dependency closure, records exact
   versions, hashes and tags in the TOML file, and subsequent plans reuse the lock.
+- Treat edits that add or change dependencies beside an existing `[[package]]`
+  lock as a stale lock to reconcile, not an invalid configuration; re-resolution
+  uses the complete requested set and prefers existing pload cache wheels.
 
 ### Removed
 

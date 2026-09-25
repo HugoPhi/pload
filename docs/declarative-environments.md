@@ -113,6 +113,15 @@ the primary index. It requires network access once; `--offline` rejects an
 unlocked file rather than guessing. A second plan is read-only and does not run
 the resolver again.
 
+Editing dependencies after a lock exists is also supported. For example, adding
+`"torch"` to a configuration whose `[[package]]` entries describe an older
+environment marks that lock as stale. The next online plan resolves the complete
+requested set—including existing exact constraints—rather than rejecting the
+file or silently dropping the new package. The resolver receives the pload wheel
+cache as a local candidate source, so compatible cached wheels are preferred and
+only missing artifacts need index access. The reconciled complete lock replaces
+the old one atomically.
+
 ### `[capabilities]`: observed non-Python context
 
 Each capability is an array of strings. `describe` currently recognizes

@@ -22,20 +22,22 @@ from pload.settings import save_settings
 from pload.snapshots import digest, execute
 
 
-def tiny_wheel(directory, tag="py3-none-any"):
+def tiny_wheel(directory, tag="py3-none-any", distribution="pload_demo", version="1.0"):
     directory.mkdir(parents=True, exist_ok=True)
-    path = directory / f"pload_demo-1.0-{tag}.whl"
+    path = directory / f"{distribution}-{version}-{tag}.whl"
+    module = distribution.replace("-", "_")
+    project = distribution.replace("_", "-")
     with zipfile.ZipFile(path, "w") as wheel:
-        wheel.writestr("pload_demo.py", "answer = 42\n")
+        wheel.writestr(f"{module}.py", "answer = 42\n")
         wheel.writestr(
-            "pload_demo-1.0.dist-info/METADATA",
-            "Metadata-Version: 2.1\nName: pload-demo\nVersion: 1.0\n",
+            f"{distribution}-{version}.dist-info/METADATA",
+            f"Metadata-Version: 2.1\nName: {project}\nVersion: {version}\n",
         )
         wheel.writestr(
-            "pload_demo-1.0.dist-info/WHEEL",
+            f"{distribution}-{version}.dist-info/WHEEL",
             f"Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: {tag}\n",
         )
-        wheel.writestr("pload_demo-1.0.dist-info/RECORD", "")
+        wheel.writestr(f"{distribution}-{version}.dist-info/RECORD", "")
     return path
 
 
@@ -94,11 +96,10 @@ def test_manifest_rejects_dangling_provider_references():
         validate_manifest(data)
 
 
-def test_manifest_rejects_mismatched_dependency_and_package_locks():
+def test_manifest_allows_dependency_edits_to_make_the_package_lock_stale():
     data = simple_manifest()
     data["environment"]["dependencies"] = ["other==1.0"]
-    with pytest.raises(PloadError, match="same pins"):
-        validate_manifest(data)
+    validate_manifest(data)
 
 
 def test_manifest_rejects_unknown_policy_repository():
@@ -271,6 +272,45 @@ def test_plan_locks_unpinned_dependencies_once_then_applies_from_cache(tmp_path,
         config.get_pip_command(restored)[0], "-c", "import pload_demo; print(pload_demo.answer)",
     ])
     assert output == "42"
+
+
+def test_plan_relocks_when_new_dependency_makes_existing_lock_stale(tmp_path, monkeypatch):
+    config = ConfigManager(home=tmp_path / "home")
+    config.get_python_path = lambda version=None: Path(sys.executable)
+    demo = tiny_wheel(tmp_path / "fixture")
+    extra = tiny_wheel(tmp_path / "fixture", distribution="extra_demo")
+    data = simple_manifest("exact")
+    data["environment"].update({
+        "python": platform.python_version(),
+        "implementation": sys.implementation.name,
+        "system": platform.system(),
+        "machine": platform.machine(),
+        "dependencies": ["pload-demo==1.0", "extra-demo"],
+    })
+    manifest = tmp_path / "pload.toml"
+    manifest.write_text(dump_manifest(data), encoding="utf-8")
+    manager = DeclarativeEnvironmentManager(config)
+    calls = []
+
+    def fake_resolver(command, *args, **kwargs):
+        if "download" not in command:
+            return ""
+        calls.append(command)
+        assert "--find-links" in command
+        assert "pload-demo==1.0" in command
+        assert "extra-demo" in command
+        destination = Path(command[command.index("--dest") + 1])
+        shutil.copyfile(demo, destination / demo.name)
+        shutil.copyfile(extra, destination / extra.name)
+        return ""
+
+    monkeypatch.setattr(declarative_module, "execute", fake_resolver)
+    plan = manager.plan(manifest)
+    assert len(calls) == 1
+    assert plan["lock"]["requested"] == ["pload-demo==1.0", "extra-demo"]
+    assert plan["lock"]["resolved"] == ["extra-demo==1.0", "pload-demo==1.0"]
+    _, locked = load_manifest(manifest)
+    assert {item["name"] for item in locked["package"]} == {"extra-demo", "pload-demo"}
 
 
 def test_describe_plan_apply_through_content_repository(tmp_path):

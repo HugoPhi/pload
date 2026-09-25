@@ -271,28 +271,9 @@ def validate_manifest(data):
                         f"artifact {artifact['filename']} references unknown repository "
                         f"{repository_name}"
                     )
-    if data.get("package"):
-        locked = {
-            normalized_name(package["name"]): package["version"]
-            for package in data["package"]
-        }
-        if all(PIN.fullmatch(item) for item in dependencies):
-            declared_pins = {
-                (normalized_name(match.group(1)), match.group(2))
-                for item in dependencies if (match := PIN.fullmatch(item))
-            }
-            if declared_pins != set(locked.items()):
-                raise PloadError(
-                    "environment.dependencies and [[package]] locks must describe the same pins"
-                )
-        else:
-            for requirement in requirements:
-                version = locked.get(normalized_name(requirement.name))
-                if version is None or (requirement.specifier
-                                       and not requirement.specifier.contains(version)):
-                    raise PloadError(
-                        f"locked packages do not satisfy dependency requirement: {requirement}"
-                    )
+    # A dependency edit can intentionally make the existing package lock stale.
+    # Planning reconciles and rewrites it; validation only checks each section's
+    # shape and internal safety.
     for name, repository in data.get("repositories", {}).items():
         safe_name(name)
         kind = repository.get("kind")
@@ -679,10 +660,29 @@ class DeclarativeEnvironmentManager:
 
     def _lock_requested_dependencies(self, path, data, offline=False):
         requested = list(data["environment"].get("dependencies", []))
-        if not requested or all(PIN.fullmatch(item) for item in requested):
+        if not requested:
             return None
+        requirements = [_parse_dependency(value) for value in requested]
+        all_exact = all(PIN.fullmatch(item) for item in requested)
+        locked = {
+            normalized_name(package["name"]): package["version"]
+            for package in data.get("package", [])
+        }
+        satisfies_requests = all(
+            normalized_name(requirement.name) in locked
+            and (not requirement.specifier or requirement.specifier.contains(
+                locked[normalized_name(requirement.name)]
+            ))
+            for requirement in requirements
+        )
+        exact_lock_matches = not all_exact or {
+            (normalized_name(match.group(1)), match.group(2))
+            for item in requested if (match := PIN.fullmatch(item))
+        } == set(locked.items())
 
-        if data.get("package"):
+        if data.get("package") and satisfies_requests and exact_lock_matches:
+            if all_exact:
+                return None
             resolved = [
                 f"{package['name']}=={package['version']}"
                 for package in sorted(
@@ -693,6 +693,9 @@ class DeclarativeEnvironmentManager:
             validate_manifest(data)
             self._write_manifest(path, data)
             return {"updated": True, "requested": requested, "resolved": resolved}
+
+        if all_exact and not data.get("package"):
+            return None
 
         network_allowed = (
             data["policy"].get("network", "allow") == "allow" and not offline
@@ -719,12 +722,18 @@ class DeclarativeEnvironmentManager:
         primary = sources[source_names[0]]["url"]
 
         self.cache.mkdir(parents=True, exist_ok=True)
+        known_repositories = {
+            (artifact["filename"], artifact["sha256"]): artifact.get("repositories", [])
+            for package in data.get("package", [])
+            for artifact in package.get("artifact", [])
+        }
         with tempfile.TemporaryDirectory(prefix="pload-lock-") as temporary:
             destination = Path(temporary)
             command = [
                 str(interpreter), "-m", "pip", "download",
                 "--disable-pip-version-check", "--only-binary=:all:",
-                "--dest", str(destination), "--index-url", primary,
+                "--dest", str(destination), "--find-links", str(self.cache),
+                "--index-url", primary,
             ]
             for source_name in source_names[1:]:
                 command += ["--extra-index-url", sources[source_name]["url"]]
@@ -761,7 +770,9 @@ class DeclarativeEnvironmentManager:
                         "filename": wheel.name,
                         "sha256": checksum,
                         "tags": sorted(str(tag) for tag in wheel_tags),
-                        "repositories": [],
+                        "repositories": known_repositories.get(
+                            (wheel.name, checksum), []
+                        ),
                     }],
                 })
 

@@ -49,6 +49,7 @@ def simple_manifest(mode="compatible"):
         "policy": {
             "reproducibility": mode, "network": "allow",
             "source_build": "fallback", "publish_missing_artifacts": True,
+            "repositories": [],
         },
         "sources": {"default": {"kind": "index", "url": "https://pypi.org/simple"}},
         "repositories": {},
@@ -86,6 +87,20 @@ def test_manifest_rejects_dangling_provider_references():
     data = simple_manifest()
     data["package"][0]["sources"] = ["missing"]
     with pytest.raises(PloadError, match="unknown source"):
+        validate_manifest(data)
+
+
+def test_manifest_rejects_mismatched_dependency_and_package_locks():
+    data = simple_manifest()
+    data["environment"]["dependencies"] = ["other==1.0"]
+    with pytest.raises(PloadError, match="same pins"):
+        validate_manifest(data)
+
+
+def test_manifest_rejects_unknown_policy_repository():
+    data = simple_manifest()
+    data["policy"]["repositories"] = ["missing"]
+    with pytest.raises(PloadError, match="unknown repositories"):
         validate_manifest(data)
 
 
@@ -178,6 +193,38 @@ def test_apply_rolls_back_a_new_environment_after_install_failure(tmp_path):
         DeclarativeEnvironmentManager(config).apply(manifest)
     with pytest.raises(PloadError):
         VenvManager(config).resolve_existing("demo")
+
+
+def test_apply_publishes_acquired_artifacts_to_policy_repository(tmp_path):
+    config = ConfigManager(home=tmp_path / "home")
+    config.get_python_path = lambda version=None: Path(sys.executable)
+    wheel = tiny_wheel(tmp_path / "artifacts")
+    checksum = digest(wheel)
+    repository = tmp_path / "store"
+    data = simple_manifest("exact")
+    data["name"] = "published"
+    data["environment"].update({
+        "python": platform.python_version(),
+        "implementation": sys.implementation.name,
+        "system": platform.system(),
+        "machine": platform.machine(),
+        "dependencies": ["pload-demo==1.0"],
+    })
+    data["policy"]["repositories"] = ["lab"]
+    data["repositories"] = {
+        "lab": {"kind": "local", "location": str(repository)},
+    }
+    data["package"] = [{
+        "name": "pload-demo", "version": "1.0", "sources": ["default"],
+        "artifact": [{
+            "filename": wheel.name, "sha256": checksum,
+            "tags": ["py3-none-any"], "repositories": [],
+        }],
+    }]
+    manifest = tmp_path / "pload.toml"
+    manifest.write_text(dump_manifest(data), encoding="utf-8")
+    DeclarativeEnvironmentManager(config).apply(manifest)
+    assert (repository / "objects" / checksum).is_file()
 
 
 def test_declarative_commands_and_shell_integration(capsys):

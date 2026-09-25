@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-Pre-release: `1.1.0a3`
+Pre-release: `1.1.0a4`
 
 ### Added
 
@@ -16,6 +16,9 @@ Pre-release: `1.1.0a3`
   while keeping credentials out of the portable configuration.
 - Reuse exact wheel archives by SHA-256, deduplicate local/SSH storage, record
   detected NVIDIA driver provenance and roll back failed materializations.
+- Add a complete field-by-field `pload.toml` reference, enforce agreement between
+  desired dependency pins and package locks, and make policy repositories and
+  `publish_missing_artifacts` drive lookup and automatic cache publication.
 
 ### Removed
 

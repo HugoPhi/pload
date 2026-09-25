@@ -90,8 +90,9 @@ pload apply pload.toml
 ```
 
 See the [declarative environment guide](docs/declarative-environments.md) for the
-schema, exact versus compatible policies, resource-selection algorithm, CUDA
-wheel caching, idempotency and current platform boundaries.
+[complete TOML field reference](docs/declarative-environments.md#complete-ploadtoml-field-reference),
+exact versus compatible policies, resource-selection algorithm, CUDA wheel
+caching, idempotency and current platform boundaries.
 
 ## Upgrade
 
@@ -112,7 +113,7 @@ pload-install --yes --package-spec "pload==1.0.0"
 To opt into the declarative-environment pre-release for testing:
 
 ```console
-pload-install --yes --package-spec "pload==1.1.0a3"
+pload-install --yes --package-spec "pload==1.1.0a4"
 ```
 
 To always follow the newest published release instead of pinning a version,

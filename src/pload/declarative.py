@@ -120,6 +120,18 @@ def load_manifest(path):
     data.setdefault("repositories", {})
     data.setdefault("capabilities", {})
     data.setdefault("package", [])
+    environment = data.setdefault("environment", {})
+    environment.setdefault("implementation", "cpython")
+    environment.setdefault("system", "")
+    environment.setdefault("machine", "")
+    environment.setdefault("dependencies", [])
+    policy = data.get("policy")
+    if isinstance(policy, dict):
+        policy.setdefault("reproducibility", "exact")
+        policy.setdefault("network", "allow")
+        policy.setdefault("source_build", "fallback")
+        policy.setdefault("publish_missing_artifacts", True)
+        policy.setdefault("repositories", [])
     for package in data["package"]:
         package.setdefault("sources", [])
         package.setdefault("artifact", [])
@@ -143,6 +155,12 @@ def validate_manifest(data):
         raise PloadError("policy.network must be allow or offline")
     if policy.get("source_build", "fallback") not in {"fallback", "forbid"}:
         raise PloadError("policy.source_build must be fallback or forbid")
+    if not isinstance(policy.get("publish_missing_artifacts", True), bool):
+        raise PloadError("policy.publish_missing_artifacts must be true or false")
+    policy_repositories = policy.get("repositories", [])
+    if (not isinstance(policy_repositories, list)
+            or any(not isinstance(name, str) for name in policy_repositories)):
+        raise PloadError("policy.repositories must be an array of repository names")
     dependencies = environment.get("dependencies", [])
     if not isinstance(dependencies, list) or any(not PIN.fullmatch(item) for item in dependencies):
         raise PloadError("environment.dependencies must contain exact NAME==VERSION pins")
@@ -187,6 +205,19 @@ def validate_manifest(data):
                         f"artifact {artifact['filename']} references unknown repository "
                         f"{repository_name}"
                     )
+    if data.get("package"):
+        declared_pins = {
+            (normalized_name(match.group(1)), match.group(2))
+            for item in dependencies if (match := PIN.fullmatch(item))
+        }
+        locked_pins = {
+            (normalized_name(package["name"]), package["version"])
+            for package in data["package"]
+        }
+        if declared_pins != locked_pins:
+            raise PloadError(
+                "environment.dependencies and [[package]] locks must describe the same pins"
+            )
     for name, repository in data.get("repositories", {}).items():
         safe_name(name)
         kind = repository.get("kind")
@@ -198,6 +229,14 @@ def validate_manifest(data):
                 raise PloadError(f"repository {name} has no location")
         else:
             raise PloadError(f"repository {name} must be local or ssh")
+    unknown_policy_repositories = set(policy_repositories).difference(
+        data.get("repositories", {})
+    )
+    if unknown_policy_repositories:
+        raise PloadError(
+            "policy.repositories references unknown repositories: "
+            + ", ".join(sorted(unknown_policy_repositories))
+        )
     return data
 
 
@@ -569,10 +608,14 @@ class DeclarativeEnvironmentManager:
         network_allowed = policy.get("network", "allow") == "allow" and not offline
         repositories = data.get("repositories", {})
         packages = self._locked_packages(data)
+        preferred_repositories = policy.get("repositories", [])
         repository_checksums = {}
         for package in packages:
             for artifact in package.get("artifact", []):
-                for repo_name in artifact.get("repositories", []):
+                repo_names = dict.fromkeys(
+                    artifact.get("repositories", []) + preferred_repositories
+                )
+                for repo_name in repo_names:
                     if repo_name in repositories:
                         repository_checksums.setdefault(repo_name, set()).add(
                             artifact["sha256"]
@@ -592,12 +635,17 @@ class DeclarativeEnvironmentManager:
                 cached = self.cache / artifact["filename"]
                 adjacent = path.parent / "artifacts" / artifact["filename"]
                 if cached.is_file() and digest(cached) == artifact["sha256"]:
-                    candidates.append(self._candidate("cache", cached, "ready", (0, 0, 0, 0)))
+                    candidates.append(self._candidate(
+                        "cache", cached, "ready", (0, 0, 0, 0), artifact
+                    ))
                 if adjacent.is_file() and digest(adjacent) == artifact["sha256"]:
                     candidates.append(self._candidate(
-                        "configuration-artifact", adjacent, "ready", (0, 0, 0, 1)
+                        "configuration-artifact", adjacent, "ready", (0, 0, 0, 1), artifact
                     ))
-                for repo_name in artifact.get("repositories", []):
+                repo_names = dict.fromkeys(
+                    artifact.get("repositories", []) + preferred_repositories
+                )
+                for repo_name in repo_names:
                     spec = repositories.get(repo_name)
                     if (spec and artifact["sha256"]
                             in repository_objects.get(repo_name, set())):
@@ -681,6 +729,7 @@ class DeclarativeEnvironmentManager:
                 return existing
             raise PloadError(f"environment {target_name!r} exists with different state")
         artifacts = []
+        locked_files = []
         compatible = []
         self.cache.mkdir(parents=True, exist_ok=True)
         repository_fetches = {}
@@ -740,8 +789,19 @@ class DeclarativeEnvironmentManager:
                         )
                     cached, artifact = acquired
                     artifacts.append(cached.resolve().as_uri() + "#sha256=" + artifact["sha256"])
+                    locked_files.append((cached, artifact["sha256"]))
                 else:
                     compatible.append(package_plan)
+            if (locked_files
+                    and data["policy"].get("publish_missing_artifacts", True)):
+                for repo_name in data["policy"].get("repositories", []):
+                    if progress:
+                        progress(
+                            f"Publishing {len(locked_files)} locked artifacts to {repo_name}"
+                        )
+                    ArtifactRepository.publish_many(
+                        data["repositories"][repo_name], locked_files, path.parent,
+                    )
             venvs = VenvManager(self.config)
             if progress:
                 progress(f"Creating environment {target_name}")

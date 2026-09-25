@@ -71,10 +71,12 @@ def test_manifest_roundtrip(tmp_path):
     assert loaded == data
 
 
-def test_manifest_requires_exact_pins():
+def test_manifest_accepts_unpinned_requirements_but_rejects_direct_urls():
     data = simple_manifest()
     data["environment"]["dependencies"] = ["demo>=1"]
-    with pytest.raises(PloadError, match="exact"):
+    validate_manifest(data)
+    data["environment"]["dependencies"] = ["demo @ https://example.com/demo.whl"]
+    with pytest.raises(PloadError, match="direct-URL"):
         validate_manifest(data)
 
 
@@ -213,6 +215,58 @@ def test_cache_plan_applies_without_package_network_access(tmp_path, monkeypatch
 
     monkeypatch.setattr(declarative_module, "execute", reject_package_network)
     restored = manager.apply(manifest)
+    output = original_execute([
+        config.get_pip_command(restored)[0], "-c", "import pload_demo; print(pload_demo.answer)",
+    ])
+    assert output == "42"
+
+
+def test_plan_locks_unpinned_dependencies_once_then_applies_from_cache(tmp_path, monkeypatch):
+    config = ConfigManager(home=tmp_path / "home")
+    config.get_python_path = lambda version=None: Path(sys.executable)
+    wheel = tiny_wheel(tmp_path / "fixture")
+    data = simple_manifest("exact")
+    data["name"] = "auto-locked"
+    data["environment"].update({
+        "python": platform.python_version(),
+        "implementation": sys.implementation.name,
+        "system": platform.system(),
+        "machine": platform.machine(),
+        "dependencies": ["pload-demo>=1"],
+    })
+    data["policy"]["publish_missing_artifacts"] = False
+    data["package"] = []
+    manifest = tmp_path / "pload.toml"
+    manifest.write_text(dump_manifest(data), encoding="utf-8")
+    manager = DeclarativeEnvironmentManager(config)
+    original_execute = declarative_module.execute
+    download_calls = []
+
+    def fake_resolver(command, *args, **kwargs):
+        if "download" in command:
+            download_calls.append(command)
+            assert "--no-deps" not in command
+            destination = Path(command[command.index("--dest") + 1])
+            shutil.copyfile(wheel, destination / wheel.name)
+            return ""
+        if "install" in command:
+            assert "--no-index" in command
+        return original_execute(command, *args, **kwargs)
+
+    monkeypatch.setattr(declarative_module, "execute", fake_resolver)
+    first = manager.plan(manifest)
+    assert first["lock"]["requested"] == ["pload-demo>=1"]
+    assert first["lock"]["resolved"] == ["pload-demo==1.0"]
+    assert first["packages"][0]["selected"]["method"] == "cache"
+    _, locked = load_manifest(manifest)
+    assert locked["environment"]["dependencies"] == ["pload-demo==1.0"]
+    assert locked["package"][0]["artifact"][0]["filename"] == wheel.name
+
+    second = manager.plan(manifest)
+    assert second["lock"] is None
+    assert len(download_calls) == 1
+    restored = manager.apply(manifest)
+    assert len(download_calls) == 1
     output = original_execute([
         config.get_pip_command(restored)[0], "-c", "import pload_demo; print(pload_demo.answer)",
     ])

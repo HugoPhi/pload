@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-Pre-release: `1.1.0a5`
+Pre-release: `1.1.0a6`
 
 ### Added
 
@@ -22,6 +22,9 @@ Pre-release: `1.1.0a5`
 - Validate locked wheel Python, ABI and platform tags against the requested
   runtime during planning; incompatible cache entries can no longer be reported
   as ready, and compatible mode explicitly plans network re-resolution instead.
+- Accept unpinned dependency intentions such as `numpy` and `pandas>=2`; the
+  first online plan resolves the complete wheel dependency closure, records exact
+  versions, hashes and tags in the TOML file, and subsequent plans reuse the lock.
 
 ### Removed
 

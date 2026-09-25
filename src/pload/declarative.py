@@ -12,6 +12,7 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from packaging.requirements import InvalidRequirement, Requirement
 from packaging.tags import compatible_tags, cpython_tags, platform_tags
 from packaging.utils import InvalidWheelFilename, parse_wheel_filename
 
@@ -33,6 +34,20 @@ SHA256 = re.compile(r"[0-9a-f]{64}")
 
 def normalized_name(value):
     return re.sub(r"[-_.]+", "-", value).lower()
+
+
+def _parse_dependency(value):
+    if not isinstance(value, str) or not value.strip():
+        raise PloadError("environment.dependencies must contain package requirements")
+    try:
+        requirement = Requirement(value)
+    except InvalidRequirement as exc:
+        raise PloadError(f"invalid dependency requirement: {value}") from exc
+    if requirement.url:
+        raise PloadError("direct-URL dependencies are not portable; declare an index source")
+    if requirement.marker:
+        raise PloadError("dependency environment markers are not supported in schema 1")
+    return requirement
 
 
 def _normalized_machine(value):
@@ -209,8 +224,12 @@ def validate_manifest(data):
             or any(not isinstance(name, str) for name in policy_repositories)):
         raise PloadError("policy.repositories must be an array of repository names")
     dependencies = environment.get("dependencies", [])
-    if not isinstance(dependencies, list) or any(not PIN.fullmatch(item) for item in dependencies):
-        raise PloadError("environment.dependencies must contain exact NAME==VERSION pins")
+    if not isinstance(dependencies, list):
+        raise PloadError("environment.dependencies must be an array of package requirements")
+    requirements = [_parse_dependency(item) for item in dependencies]
+    dependency_names = [normalized_name(item.name) for item in requirements]
+    if len(dependency_names) != len(set(dependency_names)):
+        raise PloadError("environment.dependencies contains duplicate package requirements")
     seen = set()
     for name, source in data.get("sources", {}).items():
         safe_name(name)
@@ -253,18 +272,27 @@ def validate_manifest(data):
                         f"{repository_name}"
                     )
     if data.get("package"):
-        declared_pins = {
-            (normalized_name(match.group(1)), match.group(2))
-            for item in dependencies if (match := PIN.fullmatch(item))
-        }
-        locked_pins = {
-            (normalized_name(package["name"]), package["version"])
+        locked = {
+            normalized_name(package["name"]): package["version"]
             for package in data["package"]
         }
-        if declared_pins != locked_pins:
-            raise PloadError(
-                "environment.dependencies and [[package]] locks must describe the same pins"
-            )
+        if all(PIN.fullmatch(item) for item in dependencies):
+            declared_pins = {
+                (normalized_name(match.group(1)), match.group(2))
+                for item in dependencies if (match := PIN.fullmatch(item))
+            }
+            if declared_pins != set(locked.items()):
+                raise PloadError(
+                    "environment.dependencies and [[package]] locks must describe the same pins"
+                )
+        else:
+            for requirement in requirements:
+                version = locked.get(normalized_name(requirement.name))
+                if version is None or (requirement.specifier
+                                       and not requirement.specifier.contains(version)):
+                    raise PloadError(
+                        f"locked packages do not satisfy dependency requirement: {requirement}"
+                    )
     for name, repository in data.get("repositories", {}).items():
         safe_name(name)
         kind = repository.get("kind")
@@ -649,8 +677,118 @@ class DeclarativeEnvironmentManager:
             raise PloadError(f"download did not produce one exact wheel for {installed['name']}")
         return matches[0]
 
+    def _lock_requested_dependencies(self, path, data, offline=False):
+        requested = list(data["environment"].get("dependencies", []))
+        if not requested or all(PIN.fullmatch(item) for item in requested):
+            return None
+
+        if data.get("package"):
+            resolved = [
+                f"{package['name']}=={package['version']}"
+                for package in sorted(
+                    data["package"], key=lambda item: normalized_name(item["name"])
+                )
+            ]
+            data["environment"]["dependencies"] = resolved
+            validate_manifest(data)
+            self._write_manifest(path, data)
+            return {"updated": True, "requested": requested, "resolved": resolved}
+
+        network_allowed = (
+            data["policy"].get("network", "allow") == "allow" and not offline
+        )
+        if not network_allowed:
+            raise PloadError(
+                "unlocked dependencies require one online resolution before offline planning"
+            )
+        try:
+            interpreter = self.config.get_python_path(data["environment"]["python"])
+        except PythonNotFoundError:
+            PythonManager(self.config).install_python(data["environment"]["python"])
+            interpreter = self.config.get_python_path(data["environment"]["python"])
+        self._check_runtime(interpreter, data["environment"])
+
+        sources = data.get("sources", {})
+        if not sources:
+            index = public_index(
+                self.config.settings.get("pip_index") or "https://pypi.org/simple"
+            )
+            data["sources"] = {"default": {"kind": "index", "url": index}}
+            sources = data["sources"]
+        source_names = sorted(sources, key=lambda name: (name != "default", name))
+        primary = sources[source_names[0]]["url"]
+
+        self.cache.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="pload-lock-") as temporary:
+            destination = Path(temporary)
+            command = [
+                str(interpreter), "-m", "pip", "download",
+                "--disable-pip-version-check", "--only-binary=:all:",
+                "--dest", str(destination), "--index-url", primary,
+            ]
+            for source_name in source_names[1:]:
+                command += ["--extra-index-url", sources[source_name]["url"]]
+            try:
+                execute(command + requested)
+            except PloadError as exc:
+                raise PloadError(
+                    "cannot resolve unlocked dependencies to compatible wheels for "
+                    f"Python {data['environment']['python']}"
+                ) from exc
+
+            wheels = sorted(destination.glob("*.whl"), key=lambda item: item.name.lower())
+            if not wheels:
+                raise PloadError("dependency resolution did not produce any wheels")
+            records = []
+            for wheel in wheels:
+                try:
+                    package_name, package_version, _, wheel_tags = parse_wheel_filename(
+                        wheel.name
+                    )
+                except InvalidWheelFilename as exc:
+                    raise PloadError(f"resolver produced an invalid wheel: {wheel.name}") from exc
+                checksum = digest(wheel)
+                cached = self.cache / wheel.name
+                if cached.is_file() and digest(cached) != checksum:
+                    raise PloadError(f"conflicting cached artifact: {wheel.name}")
+                if not cached.exists():
+                    shutil.copyfile(wheel, cached)
+                records.append({
+                    "name": str(package_name),
+                    "version": str(package_version),
+                    "sources": source_names,
+                    "artifact": [{
+                        "filename": wheel.name,
+                        "sha256": checksum,
+                        "tags": sorted(str(tag) for tag in wheel_tags),
+                        "repositories": [],
+                    }],
+                })
+
+        locked = {normalized_name(item["name"]): item["version"] for item in records}
+        for value in requested:
+            requirement = _parse_dependency(value)
+            version = locked.get(normalized_name(requirement.name))
+            if version is None or (requirement.specifier
+                                   and not requirement.specifier.contains(version)):
+                raise PloadError(f"resolver did not satisfy dependency requirement: {value}")
+        records.sort(key=lambda item: normalized_name(item["name"]))
+        resolved = [f"{item['name']}=={item['version']}" for item in records]
+        data["package"] = records
+        data["environment"]["dependencies"] = resolved
+        validate_manifest(data)
+        self._write_manifest(path, data)
+        return {"updated": True, "requested": requested, "resolved": resolved}
+
+    @staticmethod
+    def _write_manifest(path, data):
+        temporary = path.with_name(path.name + ".tmp")
+        temporary.write_text(dump_manifest(data), encoding="utf-8")
+        temporary.replace(path)
+
     def plan(self, manifest_path, offline=False):
         path, data = load_manifest(manifest_path)
+        lock = self._lock_requested_dependencies(path, data, offline=offline)
         policy = data["policy"]
         network_allowed = policy.get("network", "allow") == "allow" and not offline
         repositories = data.get("repositories", {})
@@ -745,7 +883,7 @@ class DeclarativeEnvironmentManager:
         ready = (python_action["status"] != "unavailable"
                  and all(item["selected"] for item in plans))
         return {"path": str(path), "name": data["name"], "python": python_action,
-                "packages": plans, "ready": ready}
+                "packages": plans, "ready": ready, "lock": lock}
 
     @staticmethod
     def _candidate(method, location, status, cost, artifact=None):
@@ -769,6 +907,8 @@ class DeclarativeEnvironmentManager:
     def apply(self, manifest_path, name=None, offline=False, progress=None):
         path, data = load_manifest(manifest_path)
         plan = self.plan(path, offline=offline)
+        if plan.get("lock"):
+            path, data = load_manifest(path)
         unavailable = [item for item in plan["packages"] if not item["selected"]]
         if unavailable:
             details = []

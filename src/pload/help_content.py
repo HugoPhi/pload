@@ -379,6 +379,10 @@ Planning reads the configuration, discovers Python interpreters and checks local
 caches, adjacent artifacts, content-addressed repositories and declared indexes.
 Incompatible resources are rejected first; valid routes are ordered by exactness,
 compatibility risk, transfer, execution cost and a deterministic tie-breaker.
+Dependencies may initially be unpinned (`numpy`, `pandas>=2`). The first online
+plan resolves their complete wheel dependency closure, writes exact versions and
+artifact hashes back to the TOML file, then plans from that lock. Later plans do
+not resolve again; `--offline` requires the lock to exist already.
 Planning is optional transparency: normal users can go directly to `pload apply`.
 """
 GUIDES[("apply",)] = r"""

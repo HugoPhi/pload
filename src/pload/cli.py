@@ -445,6 +445,12 @@ def _global_options_table(root_parser):
 
 def print_declarative_plan(plan):
     console = Console(highlight=False)
+    if plan.get("lock"):
+        count = len(plan["lock"]["resolved"])
+        console.print(
+            f"[bold green]✓ Locked {count} packages[/] and updated "
+            f"[cyan]{plan['path']}[/]"
+        )
     python = plan["python"]
     console.print(Panel.fit(
         f"[bold]{plan['name']}[/]\nPython: [cyan]{python['method']}[/] · "

@@ -92,12 +92,26 @@ fields are reserved for future schema versions and should not be relied upon.
 | `implementation` | string | `"cpython"` | `sys.implementation.name`, normally `cpython` or `pypy`. `apply` rejects a different implementation. |
 | `system` | string | empty | Target `platform.system()`, such as `Linux`, `Darwin` or `Windows`. A non-empty value is a hard compatibility constraint. |
 | `machine` | string | empty | Target `platform.machine()`, such as `x86_64`, `AMD64`, `arm64` or `aarch64`. A non-empty value is a hard compatibility constraint. |
-| `dependencies` | array of strings | `[]` | Complete desired application package set. Every entry must be an exact `NAME==VERSION` pin. When `[[package]]` lock entries exist, the two sections must describe the same normalized names and versions. pip, setuptools and wheel bootstrap packages are intentionally omitted by `describe`. |
+| `dependencies` | array of strings | `[]` | Desired packages. Entries may be names (`numpy`), version constraints (`pandas>=2,<3`) or exact pins (`numpy==2.1.3`). On the first online plan, non-exact requirements are resolved for the requested Python, the complete dependency closure replaces this list as exact pins, and matching `[[package]]` artifact locks are written. Direct URLs and environment markers are intentionally rejected in schema 1. pip, setuptools and wheel bootstrap packages are omitted by `describe`. |
 
 The environment section is desired state, not a command sequence. Paths to a
 source virtual environment are never stored here, so the configuration remains
 portable. The current schema describes one target platform and one exact Python
 version; use separate files for different targets until multi-target locks exist.
+
+For example, this is a valid initial request:
+
+```toml
+dependencies = ["numpy", "pandas>=2,<3"]
+```
+
+`pload plan` asks pip under the requested interpreter to resolve these requirements
+and their transitive dependencies as compatible wheels. It then atomically rewrites
+the same file with exact `NAME==VERSION` dependencies plus wheel filenames,
+SHA-256 hashes and tags. Resolution uses all declared indexes, with `default` as
+the primary index. It requires network access once; `--offline` rejects an
+unlocked file rather than guessing. A second plan is read-only and does not run
+the resolver again.
 
 ### `[capabilities]`: observed non-Python context
 
@@ -298,6 +312,13 @@ pload plan project.pload.toml
 pload plan --offline
 pload plan --json
 ```
+
+If the dependency list contains unpinned requirements and no existing package
+lock, the first online `plan` performs a lock step before resource selection. Its
+output reports that `pload.toml` was updated. The generated lock contains the
+complete wheel dependency closure, so `apply` does not ask pip to resolve
+dependencies again. Schema 1 currently requires wheel availability during this
+automatic lock step; it does not create a portable exact lock from an sdist.
 
 The planner inventories:
 

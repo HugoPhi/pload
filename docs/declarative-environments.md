@@ -130,6 +130,15 @@ Command-line `--offline` is intentionally one-way: it prevents a configuration
 from unexpectedly using the internet, while a file declaring `network =
 "offline"` cannot be weakened accidentally by omitting the flag.
 
+Changing `environment.python` does not make native wheels portable. During
+planning, pload parses every locked wheel filename and compares its Python, ABI
+and platform tags with the requested runtime. For example, a cached `cp39-cp39`
+wheel is rejected for Python 3.8 even when its checksum is valid. Under `exact`,
+that makes the plan unavailable; under `compatible`, the planner may select an
+explicit `index-resolve / network` route for that package. Universal wheels such
+as `py3-none-any` can still be reused. `apply` never silently treats an
+incompatible cached wheel as ready.
+
 ### `[sources.NAME]`: Python package indexes
 
 `NAME` is a logical identifier used by package locks, for example `default` or
@@ -298,6 +307,11 @@ The planner inventories:
 4. content-addressed local and SSH repositories named in the file;
 5. package indexes named in the file;
 6. target OS, architecture and Python implementation.
+
+The Python row and package rows describe separate resources. A plan may reuse
+every package from cache while still showing `Python: install-python · ... ·
+network`; in that case the download is the Python runtime itself. `reuse-python ·
+... · ready` means no runtime download is planned.
 
 It first rejects candidates that violate hard requirements. Remaining candidates
 are ordered lexicographically by reproducibility loss, compatibility risk,

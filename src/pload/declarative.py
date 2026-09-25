@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import platform
 import re
 import shlex
 import shutil
@@ -10,6 +11,9 @@ import tempfile
 import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
+
+from packaging.tags import compatible_tags, cpython_tags, platform_tags
+from packaging.utils import InvalidWheelFilename, parse_wheel_filename
 
 try:
     import tomllib
@@ -29,6 +33,49 @@ SHA256 = re.compile(r"[0-9a-f]{64}")
 
 def normalized_name(value):
     return re.sub(r"[-_.]+", "-", value).lower()
+
+
+def _normalized_machine(value):
+    aliases = {
+        "amd64": "x86_64", "x64": "x86_64",
+        "aarch64": "arm64", "arm64": "arm64",
+    }
+    normalized = str(value).lower()
+    return aliases.get(normalized, normalized)
+
+
+def _target_wheel_tags(environment):
+    """Return wheel tags installable on the requested runtime on this host."""
+    if (environment.get("system")
+            and environment["system"].lower() != platform.system().lower()):
+        return set()
+    if (environment.get("machine")
+            and _normalized_machine(environment["machine"])
+            != _normalized_machine(platform.machine())):
+        return set()
+    try:
+        version = tuple(int(part) for part in environment["python"].split(".")[:2])
+    except (KeyError, TypeError, ValueError):
+        return set()
+    if len(version) != 2:
+        return set()
+    platforms = list(platform_tags())
+    implementation = environment.get("implementation", "cpython").lower()
+    interpreter = f"cp{version[0]}{version[1]}" if implementation == "cpython" else None
+    result = set(compatible_tags(
+        python_version=version, interpreter=interpreter, platforms=platforms,
+    ))
+    if implementation == "cpython":
+        result.update(cpython_tags(python_version=version, platforms=platforms))
+    return result
+
+
+def _artifact_is_compatible(artifact, supported_tags):
+    try:
+        wheel_tags = parse_wheel_filename(artifact["filename"])[3]
+    except (InvalidWheelFilename, KeyError, TypeError):
+        return False
+    return bool(wheel_tags.intersection(supported_tags))
 
 
 def manifest_digest(data):
@@ -609,9 +656,20 @@ class DeclarativeEnvironmentManager:
         repositories = data.get("repositories", {})
         packages = self._locked_packages(data)
         preferred_repositories = policy.get("repositories", [])
+        supported_tags = _target_wheel_tags(data["environment"])
+        try:
+            python = str(self.config.get_python_path(data["environment"]["python"]))
+            python_action = {"method": "reuse-python", "location": python, "status": "ready"}
+        except PythonNotFoundError:
+            python_action = {
+                "method": "install-python", "location": data["environment"]["python"],
+                "status": "network" if network_allowed else "unavailable",
+            }
         repository_checksums = {}
         for package in packages:
             for artifact in package.get("artifact", []):
+                if not _artifact_is_compatible(artifact, supported_tags):
+                    continue
                 repo_names = dict.fromkeys(
                     artifact.get("repositories", []) + preferred_repositories
                 )
@@ -631,7 +689,19 @@ class DeclarativeEnvironmentManager:
         plans = []
         for package in packages:
             candidates = []
+            rejections = []
             for artifact in package.get("artifact", []):
+                if not _artifact_is_compatible(artifact, supported_tags):
+                    rejections.append({
+                        "artifact": artifact["filename"],
+                        "reason": (
+                            f"incompatible with {data['environment']['implementation']} "
+                            f"{data['environment']['python']} on "
+                            f"{data['environment'].get('system') or platform.system()} "
+                            f"{data['environment'].get('machine') or platform.machine()}"
+                        ),
+                    })
+                    continue
                 cached = self.cache / artifact["filename"]
                 adjacent = path.parent / "artifacts" / artifact["filename"]
                 if cached.is_file() and digest(cached) == artifact["sha256"]:
@@ -660,8 +730,7 @@ class DeclarativeEnvironmentManager:
                                 "index-exact", source_name, "network",
                                 (0, 0, 2, source_name), artifact,
                             ))
-            if (not package.get("artifact")
-                    and policy.get("reproducibility") == "compatible" and network_allowed):
+            if policy.get("reproducibility") == "compatible" and network_allowed:
                 source_name = (package.get("sources") or ["default"])[0]
                 candidates.append(self._candidate(
                     "index-resolve", source_name, "network", (1, 1, 2, source_name)
@@ -671,15 +740,8 @@ class DeclarativeEnvironmentManager:
                 "name": package["name"], "version": package["version"],
                 "selected": candidates[0] if candidates else None,
                 "alternatives": candidates[1:],
+                "rejections": rejections,
             })
-        try:
-            python = str(self.config.get_python_path(data["environment"]["python"]))
-            python_action = {"method": "reuse-python", "location": python, "status": "ready"}
-        except PythonNotFoundError:
-            python_action = {
-                "method": "install-python", "location": data["environment"]["python"],
-                "status": "network" if network_allowed else "unavailable",
-            }
         ready = (python_action["status"] != "unavailable"
                  and all(item["selected"] for item in plans))
         return {"path": str(path), "name": data["name"], "python": python_action,
@@ -709,8 +771,13 @@ class DeclarativeEnvironmentManager:
         plan = self.plan(path, offline=offline)
         unavailable = [item for item in plan["packages"] if not item["selected"]]
         if unavailable:
-            names = ", ".join(f"{item['name']}=={item['version']}" for item in unavailable)
-            raise PloadError(f"no valid reproduction route for: {names}")
+            details = []
+            for item in unavailable:
+                label = f"{item['name']}=={item['version']}"
+                if item.get("rejections"):
+                    label += f" ({item['rejections'][0]['reason']})"
+                details.append(label)
+            raise PloadError("no valid reproduction route for: " + ", ".join(details))
         if plan["python"]["method"] == "install-python":
             if plan["python"]["status"] == "unavailable":
                 raise PloadError("required Python is unavailable while offline")

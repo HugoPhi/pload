@@ -447,7 +447,8 @@ def print_declarative_plan(plan):
     console = Console(highlight=False)
     python = plan["python"]
     console.print(Panel.fit(
-        f"[bold]{plan['name']}[/]\nPython: [cyan]{python['method']}[/] · {python['location']}",
+        f"[bold]{plan['name']}[/]\nPython: [cyan]{python['method']}[/] · "
+        f"{python['location']} · [bold]{python['status']}[/]",
         title="[bold cyan]Environment plan[/]",
         border_style="blue",
     ))
@@ -463,8 +464,13 @@ def print_declarative_plan(plan):
             table.add_row(package["name"], package["version"], selected["method"],
                           selected["status"], selected["location"])
         else:
-            table.add_row(package["name"], package["version"], "—", "unavailable",
-                          "No resource satisfies the configuration")
+            rejected = package.get("rejections", [])
+            if rejected:
+                table.add_row(package["name"], package["version"], "—", "incompatible",
+                              rejected[0]["artifact"])
+            else:
+                table.add_row(package["name"], package["version"], "—", "unavailable",
+                              "No resource satisfies the configuration")
     console.print(table)
 
 

@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-Pre-release: `1.1.0a4`
+Pre-release: `1.1.0a5`
 
 ### Added
 
@@ -19,6 +19,9 @@ Pre-release: `1.1.0a4`
 - Add a complete field-by-field `pload.toml` reference, enforce agreement between
   desired dependency pins and package locks, and make policy repositories and
   `publish_missing_artifacts` drive lookup and automatic cache publication.
+- Validate locked wheel Python, ABI and platform tags against the requested
+  runtime during planning; incompatible cache entries can no longer be reported
+  as ready, and compatible mode explicitly plans network re-resolution instead.
 
 ### Removed
 

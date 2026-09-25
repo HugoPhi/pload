@@ -5,7 +5,9 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from packaging.tags import platform_tags
 
+import pload.declarative as declarative_module
 from pload.cli import build_parser, main, shell_script
 from pload.declarative import (
     DeclarativeEnvironmentManager,
@@ -20,9 +22,9 @@ from pload.settings import save_settings
 from pload.snapshots import digest, execute
 
 
-def tiny_wheel(directory):
+def tiny_wheel(directory, tag="py3-none-any"):
     directory.mkdir(parents=True, exist_ok=True)
-    path = directory / "pload_demo-1.0-py3-none-any.whl"
+    path = directory / f"pload_demo-1.0-{tag}.whl"
     with zipfile.ZipFile(path, "w") as wheel:
         wheel.writestr("pload_demo.py", "answer = 42\n")
         wheel.writestr(
@@ -31,7 +33,7 @@ def tiny_wheel(directory):
         )
         wheel.writestr(
             "pload_demo-1.0.dist-info/WHEEL",
-            "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+            f"Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: {tag}\n",
         )
         wheel.writestr("pload_demo-1.0.dist-info/RECORD", "")
     return path
@@ -118,6 +120,103 @@ def test_exact_configuration_requires_an_artifact_route(tmp_path):
     path.write_text(dump_manifest(data), encoding="utf-8")
     manager = DeclarativeEnvironmentManager(ConfigManager(home=tmp_path / "home"))
     assert manager.plan(path)["ready"] is False
+
+
+def test_changed_python_rejects_incompatible_cached_wheel_before_apply(tmp_path, monkeypatch):
+    config = ConfigManager(home=tmp_path / "home")
+    config.get_python_path = lambda version=None: Path(sys.executable)
+    incompatible_tag = f"cp37-cp37m-{next(iter(platform_tags()))}"
+    wheel = tiny_wheel(tmp_path / "fixture", incompatible_tag)
+    data = simple_manifest("exact")
+    data["name"] = "changed-python"
+    data["environment"].update({
+        "python": platform.python_version(),
+        "implementation": sys.implementation.name,
+        "system": platform.system(),
+        "machine": platform.machine(),
+        "dependencies": ["pload-demo==1.0"],
+    })
+    data["package"] = [{
+        "name": "pload-demo", "version": "1.0", "sources": ["default"],
+        "artifact": [{
+            "filename": wheel.name, "sha256": digest(wheel),
+            "tags": [incompatible_tag], "repositories": [],
+        }],
+    }]
+    manifest = tmp_path / "pload.toml"
+    manifest.write_text(dump_manifest(data), encoding="utf-8")
+    manager = DeclarativeEnvironmentManager(config)
+    manager.cache.mkdir(parents=True)
+    shutil.copyfile(wheel, manager.cache / wheel.name)
+
+    plan = manager.plan(manifest)
+    package = plan["packages"][0]
+    assert package["selected"] is None
+    assert package["rejections"][0]["artifact"] == wheel.name
+    assert "incompatible with" in package["rejections"][0]["reason"]
+    assert plan["ready"] is False
+
+    monkeypatch.setattr(
+        VenvManager, "create_venv",
+        lambda *args, **kwargs: pytest.fail("apply created an environment for an invalid plan"),
+    )
+    monkeypatch.setattr(
+        manager, "_acquire",
+        lambda *args, **kwargs: pytest.fail("apply downloaded an incompatible artifact"),
+    )
+    with pytest.raises(PloadError, match="incompatible with"):
+        manager.apply(manifest)
+
+    data["policy"]["reproducibility"] = "compatible"
+    manifest.write_text(dump_manifest(data), encoding="utf-8")
+    compatible = manager.plan(manifest)["packages"][0]
+    assert compatible["selected"]["method"] == "index-resolve"
+    assert compatible["selected"]["status"] == "network"
+
+
+def test_cache_plan_applies_without_package_network_access(tmp_path, monkeypatch):
+    config = ConfigManager(home=tmp_path / "home")
+    config.get_python_path = lambda version=None: Path(sys.executable)
+    wheel = tiny_wheel(tmp_path / "fixture")
+    data = simple_manifest("exact")
+    data["name"] = "cache-only"
+    data["environment"].update({
+        "python": platform.python_version(),
+        "implementation": sys.implementation.name,
+        "system": platform.system(),
+        "machine": platform.machine(),
+        "dependencies": ["pload-demo==1.0"],
+    })
+    data["policy"]["publish_missing_artifacts"] = False
+    data["package"] = [{
+        "name": "pload-demo", "version": "1.0", "sources": ["default"],
+        "artifact": [{
+            "filename": wheel.name, "sha256": digest(wheel),
+            "tags": ["py3-none-any"], "repositories": [],
+        }],
+    }]
+    manifest = tmp_path / "pload.toml"
+    manifest.write_text(dump_manifest(data), encoding="utf-8")
+    manager = DeclarativeEnvironmentManager(config)
+    manager.cache.mkdir(parents=True)
+    shutil.copyfile(wheel, manager.cache / wheel.name)
+    assert manager.plan(manifest)["packages"][0]["selected"]["method"] == "cache"
+
+    original_execute = declarative_module.execute
+
+    def reject_package_network(command, *args, **kwargs):
+        if "download" in command:
+            pytest.fail("a cache plan attempted a package download")
+        if "install" in command and "--no-index" not in command:
+            pytest.fail("a cache plan allowed pip index access")
+        return original_execute(command, *args, **kwargs)
+
+    monkeypatch.setattr(declarative_module, "execute", reject_package_network)
+    restored = manager.apply(manifest)
+    output = original_execute([
+        config.get_pip_command(restored)[0], "-c", "import pload_demo; print(pload_demo.answer)",
+    ])
+    assert output == "42"
 
 
 def test_describe_plan_apply_through_content_repository(tmp_path):

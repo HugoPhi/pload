@@ -502,6 +502,42 @@ class ArtifactRepository:
         execute(["ssh", *cls.SSH_OPTIONS, host, verify], timeout=75)
 
     @classmethod
+    def publish_package_record(cls, spec, package, version, artifact, base):
+        """Publish a small searchable record separately from the immutable object."""
+        record = {
+            "schema": 1, "name": normalized_name(package), "version": version,
+            "filename": artifact["filename"], "sha256": artifact["sha256"],
+        }
+        relative = (
+            f"packages/{record['name']}/{version}/{artifact['filename']}.json"
+        )
+        payload = json.dumps(record, sort_keys=True, indent=2) + "\n"
+        if spec["kind"] == "local":
+            target = cls._local_root(spec, base) / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            temporary = target.with_name(target.name + "." + uuid.uuid4().hex)
+            temporary.write_text(payload, encoding="utf-8")
+            temporary.replace(target)
+            return
+        host, root = RepositoryManager.ssh_location(spec["location"])
+        remote = root + "/" + relative
+        with tempfile.TemporaryDirectory(prefix="pload-record-") as temporary:
+            local = Path(temporary) / "record.json"
+            local.write_text(payload, encoding="utf-8")
+            pending = remote + "." + uuid.uuid4().hex
+            execute([
+                "ssh", *cls.SSH_OPTIONS, host,
+                f"mkdir -p {shlex.quote(remote.rsplit('/', 1)[0])}",
+            ], timeout=75)
+            execute([
+                "scp", "-q", *cls.SSH_OPTIONS, str(local), host + ":" + pending,
+            ], timeout=75)
+            execute([
+                "ssh", *cls.SSH_OPTIONS, host,
+                f"mv {shlex.quote(pending)} {shlex.quote(remote)}",
+            ], timeout=75)
+
+    @classmethod
     def fetch(cls, spec, checksum, destination, base):
         cls.fetch_many(spec, [(checksum, destination)], base)
 
@@ -747,6 +783,57 @@ class DeclarativeEnvironmentManager:
         data["resolved_dependencies"] = pins
         self._write_lock(output, data)
         return output
+
+    def publish_package(self, package_name, environment=".", repository=None, index=None):
+        """Explicitly preserve one installed package wheel in a configured repository."""
+        requirement = _parse_dependency(package_name)
+        if requirement.specifier and not str(requirement.specifier).startswith("=="):
+            raise PloadError("remote add accepts a package name or one exact NAME==VERSION")
+        env = VenvManager(self.config).resolve_existing(environment)
+        interpreter = env / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        installed = next(
+            (item for item in probe(interpreter).get("packages", [])
+             if normalized_name(item["name"]) == normalized_name(requirement.name)),
+            None,
+        )
+        if not installed:
+            raise PloadError(f"{requirement.name} is not installed in {environment}")
+        if requirement.specifier and not requirement.specifier.contains(installed["version"]):
+            raise PloadError(
+                f"{requirement.name} {installed['version']} does not satisfy "
+                f"{requirement.specifier}"
+            )
+        repositories = self.config.settings.get("repositories", {})
+        selected_repository = repository or (min(repositories) if repositories else None)
+        if not selected_repository or selected_repository not in repositories:
+            raise PloadError("choose a configured repository with --remote")
+        source_index = public_index(
+            index or self.config.settings.get("pip_index") or "https://pypi.org/simple"
+        )
+        with tempfile.TemporaryDirectory(prefix="pload-remote-add-") as temporary:
+            wheel = self._obtain_wheel(
+                interpreter, installed, Path(temporary), source_index,
+            )
+            checksum = digest(wheel)
+            artifact = {"filename": wheel.name, "sha256": checksum}
+            ArtifactRepository.publish(
+                repositories[selected_repository], wheel, checksum, Path.cwd(),
+            )
+            ArtifactRepository.publish_package_record(
+                repositories[selected_repository], installed["name"],
+                installed["version"], artifact, Path.cwd(),
+            )
+            self.cache.mkdir(parents=True, exist_ok=True)
+            cached = self.cache / wheel.name
+            if not cached.exists():
+                temporary_cache = cached.with_name(cached.name + "." + uuid.uuid4().hex)
+                shutil.copyfile(wheel, temporary_cache)
+                temporary_cache.replace(cached)
+        return {
+            "package": installed["name"], "version": installed["version"],
+            "repository": selected_repository, "filename": artifact["filename"],
+            "sha256": checksum,
+        }
 
     def _obtain_wheel(self, interpreter, installed, wheel_dir, index):
         expected_name = normalized_name(installed["name"])
@@ -1347,6 +1434,17 @@ class DeclarativeEnvironmentManager:
             except (OSError, PloadError):
                 venvs.remove_venv(target_name)
                 raise
+
+    def save_plan(self, manifest_path, plan):
+        """Persist user-selected routes against the exact current configuration and lock."""
+        path, data, current, _ = self._load_state(manifest_path)
+        if data["environment"].get("dependencies") and not current:
+            raise PloadError("cannot save routes against a missing or stale lock")
+        sidecar = lock_path(path)
+        return write_plan(
+            path, configuration_digest(data),
+            file_digest(sidecar) if sidecar.is_file() else "", plan,
+        )
 
     @staticmethod
     def _validate_saved_plan(saved, data):

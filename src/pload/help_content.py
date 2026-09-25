@@ -433,6 +433,22 @@ Removing a provider forgets its configuration but does not delete remote data.
 for _command in ("add", "list", "remove"):
     GUIDES[("repo", _command)] = GUIDES[("repo",)]
 
+GUIDES[("remote",)] = r"""
+# Back up package artifacts explicitly
+
+```console
+pload remote add torch --from v10 --remote lab
+pload remote add numpy==2.1.0 -f ./project/.venv -r disk
+```
+
+`remote add` finds the exact installed version, reuses its original cached wheel
+when available, verifies its SHA-256 identity, and stores it in the selected
+content-addressed repository. If the original wheel is unavailable it may fetch
+that exact version from `--index`. Planning and applying never upload packages;
+publication happens only through this explicit command.
+"""
+GUIDES[("remote", "add")] = GUIDES[("remote",)]
+
 
 def render_detailed_help(parser, command_path):
     console = Console(highlight=False)

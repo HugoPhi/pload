@@ -582,6 +582,34 @@ def test_apply_requires_a_saved_plan_and_never_auto_publishes(tmp_path):
     assert not (repository / "objects" / checksum).exists()
 
 
+def test_remote_add_explicitly_publishes_one_installed_package(tmp_path):
+    repository = tmp_path / "remote"
+    config_home = tmp_path / "home"
+    save_settings(config_home, {
+        "repositories": {"lab": {"kind": "local", "location": str(repository)}},
+    })
+    config = ConfigManager(home=config_home)
+    config.get_python_path = lambda version=None: Path(sys.executable)
+    wheel = tiny_wheel(tmp_path / "fixture")
+    source = VenvManager(config).create_venv(name="remote-source")
+    execute(config.get_pip_command(source) + [
+        "install", "--no-index", "--find-links", str(wheel.parent), "pload-demo==1.0",
+    ])
+    manager = DeclarativeEnvironmentManager(config)
+    manager.cache.mkdir(parents=True)
+    shutil.copyfile(wheel, manager.cache / wheel.name)
+
+    result = manager.publish_package("pload-demo", "remote-source", "lab")
+
+    assert result["sha256"] == digest(wheel)
+    assert (repository / "objects" / digest(wheel)).is_file()
+    record = (
+        repository / "packages" / "pload-demo" / "1.0" / f"{wheel.name}.json"
+    )
+    assert record.is_file()
+    assert '"sha256": "' + digest(wheel) + '"' in record.read_text(encoding="utf-8")
+
+
 def test_apply_obeys_selected_route_without_fallback(tmp_path, monkeypatch):
     config = ConfigManager(home=tmp_path / "home")
     config.get_python_path = lambda version=None: Path(sys.executable)
@@ -697,6 +725,9 @@ def test_declarative_commands_and_shell_integration(capsys):
     assert parsed.package_sources == ["torch=https://download.pytorch.org/whl/cu121"]
     assert parser.parse_args(["lock"]).file == "pload.toml"
     assert parser.parse_args(["apply"]).file == "pload.toml"
+    assert parser.parse_args(["plan", "--no-ui"]).no_ui is True
+    remote = parser.parse_args(["remote", "add", "numpy", "-f", "v10", "-r", "lab"])
+    assert (remote.package, remote.environment, remote.repository) == ("numpy", "v10", "lab")
     for command in ("describe", "lock", "plan", "apply"):
         assert main([command, "-h"]) == 0
         for shell in ("bash", "zsh", "fish", "powershell"):

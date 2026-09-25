@@ -33,6 +33,7 @@ COMMAND_ALIASES = {
     "plan": (),
     "apply": (),
     "repo": (),
+    "remote": (),
 }
 PYTHON_ALIASES = {
     "install": (),
@@ -315,6 +316,10 @@ Aliases: system=sys, managed=uv""",
     plan.add_argument("--offline", "-o", action="store_true",
                       help="plan using only resources available without the internet")
     plan.add_argument("--json", "-j", action="store_true", help="emit machine-readable JSON")
+    plan.add_argument(
+        "--no-ui", "-N", action="store_true",
+        help="select the fastest routes without opening the interactive route chooser",
+    )
     apply = subparsers.add_parser(
         "apply", description="Materialize the desired environment from available resources.",
         help="create or verify an environment from pload.toml",
@@ -335,6 +340,20 @@ Aliases: system=sys, managed=uv""",
     actions.add_parser("list", aliases=["ls"], description="Show configured repositories.")
     remove = actions.add_parser("remove", description="Remove configuration, keeping all remote files.")
     remove.add_argument("name", help="repository nickname")
+    remote = subparsers.add_parser(
+        "remote", help="explicitly back up installed package artifacts",
+        description="Search or store package artifacts in configured local/SSH repositories.",
+    )
+    remote_actions = remote.add_subparsers(dest="remote_command", required=True)
+    remote_add = remote_actions.add_parser(
+        "add", description="Back up one installed package wheel; never runs during apply.",
+    )
+    remote_add.add_argument("package", help="installed package name or exact NAME==VERSION")
+    remote_add.add_argument("--from", "-f", dest="environment", default=".",
+                            help="source environment ID, name, or path (default: .)")
+    remote_add.add_argument("--remote", "-r", dest="repository",
+                            help="configured repository name (default: first configured)")
+    remote_add.add_argument("--index", "-i", help="index used only if no original wheel is cached")
     return parser
 
 
@@ -492,6 +511,66 @@ def print_declarative_plan(plan):
     )
 
 
+def choose_declarative_routes(plan):
+    """Navigate every package route with backtracking and undo in a terminal."""
+    from pload.resource_plan import PlanSelection
+
+    console = Console(highlight=False)
+    selection = PlanSelection(plan)
+    if not plan["packages"]:
+        return "save"
+    cursor = 0
+    while True:
+        packages = plan["packages"]
+        package = packages[cursor]
+        routes = selection.routes(cursor)
+        console.clear()
+        console.print(Panel.fit(
+            f"[bold green]{package['name']}[/]==[yellow]{package['version']}[/]\n"
+            f"Package [bold]{cursor + 1}[/] of [bold]{len(packages)}[/]",
+            title="[bold cyan]Choose acquisition route[/]", border_style="blue",
+        ))
+        table = Table(box=box.ROUNDED, header_style="bold cyan", border_style="blue")
+        table.add_column("#", justify="right", style="bold yellow")
+        table.add_column("METHOD", style="green")
+        table.add_column("TIME", justify="right")
+        table.add_column("RESOURCE")
+        for index, route in enumerate(routes, 1):
+            marker = "✓" if index == 1 else str(index)
+            seconds = route.get("estimated_seconds", 0)
+            table.add_row(marker, route["method"], f"~{seconds:g}s", route["location"])
+        if routes:
+            console.print(table)
+        else:
+            console.print("[bold red]No valid route is currently available.[/]")
+        console.print(
+            "[dim]number choose · Enter/n next · p previous · u undo · "
+            "r reset fastest · s save · a save & apply · q quit[/]"
+        )
+        command = console.input("[bold cyan]route> [/]").strip().lower()
+        if command.isdigit():
+            try:
+                selection.select(cursor, int(command) - 1)
+            except IndexError:
+                continue
+            if cursor < len(packages) - 1:
+                cursor += 1
+        elif command in {"", "n", "next"}:
+            cursor = min(cursor + 1, len(packages) - 1)
+        elif command in {"p", "previous", "back"}:
+            cursor = max(cursor - 1, 0)
+        elif command in {"u", "undo"}:
+            selection.undo()
+        elif command in {"r", "reset"}:
+            selection.reset()
+        elif command in {"s", "save"}:
+            return "save"
+        elif command in {"a", "apply"}:
+            return "apply"
+        elif command in {"q", "quit"}:
+            return "quit"
+
+
 def _print_spaced_section(console, renderable):
     """Give a standalone section consistent visual breathing room."""
     console.print()
@@ -567,6 +646,7 @@ def _brief_help(parser, command_path, root_parser=None):
             "plan": "Compare a configuration with available resources",
             "apply": "Materialize the environment declared by pload.toml",
             "repo": "Manage local and SSH artifact providers",
+            "remote": "Explicitly back up installed package artifacts",
         }
         for command, summary in summaries.items():
             aliases = COMMAND_ALIASES[command]
@@ -755,7 +835,7 @@ def run(argv=None):
     venvs = VenvManager(config)
     dependencies = DependencyManager(config)
 
-    if command in {"describe", "lock", "plan", "apply", "repo"}:
+    if command in {"describe", "lock", "plan", "apply", "repo", "remote"}:
         if command == "repo":
             from pload.snapshots import RepositoryManager
 
@@ -770,7 +850,16 @@ def run(argv=None):
         from pload.declarative import DeclarativeEnvironmentManager
 
         manager = DeclarativeEnvironmentManager(config)
-        if command == "describe":
+        if command == "remote":
+            result = manager.publish_package(
+                args.package, args.environment, args.repository, args.index,
+            )
+            Console(highlight=False).print(
+                f"[bold green]✓ Backed up {result['package']}=={result['version']}[/] "
+                f"to [cyan]{result['repository']}[/]\n"
+                f"[dim]{result['filename']} · sha256:{result['sha256']}[/]"
+            )
+        elif command == "describe":
             progress_console = Console(highlight=False)
             print(manager.describe(
                 args.source, args.output, args.name, args.mode, args.repository,
@@ -810,7 +899,15 @@ def run(argv=None):
                             f"[cyan]{message}…[/]"
                         ),
                     )
+                action = "save"
+                chooser_console = Console(highlight=False)
+                if chooser_console.is_terminal and not args.no_ui:
+                    action = choose_declarative_routes(plan)
+                    if action != "quit":
+                        plan["plan_path"] = str(manager.save_plan(args.file, plan))
                 print_declarative_plan(plan)
+                if action == "apply":
+                    chooser_console.print(manager.apply(args.file, offline=args.offline))
         else:
             progress_console = Console(highlight=False)
             print(manager.apply(

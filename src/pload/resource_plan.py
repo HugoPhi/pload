@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from copy import deepcopy
 from pathlib import Path
 
 try:
@@ -10,6 +11,45 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.8
     import tomli as tomllib
 
 from pload.errors import PloadError
+
+
+class PlanSelection:
+    """Mutable route selection with deterministic reset and multi-step undo."""
+
+    def __init__(self, plan):
+        self.plan = plan
+        self._original = deepcopy(plan.get("packages", []))
+        self._history = []
+
+    def routes(self, package_index):
+        package = self.plan["packages"][package_index]
+        return ([package["selected"]] if package.get("selected") else []) + list(
+            package.get("alternatives", [])
+        )
+
+    def select(self, package_index, route_index):
+        routes = self.routes(package_index)
+        if route_index < 0 or route_index >= len(routes):
+            raise IndexError("route index out of range")
+        self._history.append(deepcopy(self.plan["packages"]))
+        package = self.plan["packages"][package_index]
+        package["selected"] = routes[route_index]
+        package["alternatives"] = [
+            route for index, route in enumerate(routes) if index != route_index
+        ]
+        self.plan["ready"] = all(
+            item.get("selected") for item in self.plan["packages"]
+        ) and self.plan["python"].get("status") != "unavailable"
+
+    def undo(self):
+        if not self._history:
+            return False
+        self.plan["packages"] = self._history.pop()
+        return True
+
+    def reset(self):
+        self._history.append(deepcopy(self.plan["packages"]))
+        self.plan["packages"] = deepcopy(self._original)
 
 
 def plan_path(configuration_path):

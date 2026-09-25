@@ -2,36 +2,52 @@
 
 ## Unreleased
 
-Pre-release: `1.1.0a10`
+Pre-release: `1.2.0a1`
+
+### Architecture reset
+
+- Replace the discarded lock-then-plan prototype with a resource-aware
+  workflow: `plan` resolves only from Simple API/Core Metadata, inventories all
+  resources, and writes `.pload_plan.toml`; `apply` executes that exact file.
+- Never download wheel bodies during planning. Indexes without PEP 658/714
+  metadata fail with an actionable message instead of silently filling cache.
+- Discover exact wheels in pload, pip and uv caches and copyable distributions
+  in compatible pload environments. Recheck SHA-256 or installed `RECORD`
+  fingerprints during apply.
+- Add an interactive per-package route chooser with previous/next navigation,
+  undo, reset-to-fastest, save and save-and-apply actions.
+- Add explicit `pload remote add PACKAGE --from ENV --remote REPO`; apply and
+  describe never publish package bytes automatically.
+- Persist exact artifact URLs and hashes, reject stale or incomplete plans, and
+  stop on selected-route failure without trying alternatives.
 
 ### Added
 
 - Keep user intent in a clean portable `pload.toml` and store pload-managed
   exact dependency, artifact and hash decisions in sibling `.pload_lock.toml`.
-- Add `pload describe`, explicit `pload lock`, read-only `pload plan` and
-  idempotent `pload apply`; downloading cannot be triggered by planning.
+- Add `pload describe`, metadata-only `pload plan` and idempotent `pload apply`.
 - Inventory the local wheel cache, adjacent artifacts, local/SSH content stores,
   configured indexes and Python installations before choosing a route.
 - Allow package-specific indexes in `describe`, including CUDA wheel indexes,
   while keeping credentials out of the portable configuration.
 - Reuse exact wheel archives by SHA-256, deduplicate local/SSH storage, record
   detected NVIDIA driver provenance and roll back failed materializations.
-- Add complete field-by-field configuration and lock references, enforce agreement between
+- Add complete field-by-field configuration, lock and plan references, enforce agreement between
   desired dependency pins and package locks, and make policy repositories and
-  `publish_missing_artifacts` drive lookup and automatic cache publication.
+  repositories drive lookup while publication remains explicit.
 - Validate locked wheel Python, ABI and platform tags against the requested
   runtime during planning; incompatible cache entries can no longer be reported
   as ready, and compatible mode explicitly plans network re-resolution instead.
 - Accept unpinned dependency intentions such as `numpy` and `pandas>=2`; the
-  explicit lock command resolves the complete wheel dependency closure, records
-  exact versions, hashes and tags, and subsequent plans inspect it read-only.
+  metadata-only planner resolves the complete dependency closure and records
+  exact versions, hashes, URLs and tags without fetching wheel bodies.
 - Treat edits that add or change dependencies beside an existing lock as a stale
   lock to reconcile, not an invalid configuration; re-resolution
   uses the complete requested set and prefers existing pload cache wheels.
 - Migrate lock tables embedded by earlier 1.1 previews into `.pload_lock.toml`
   without another dependency resolution or artifact download.
-- Show animated status for explicit locking and artifact-repository inspection
-  instead of appearing frozen while pip or SSH work is captured in the background.
+- Show animated status for metadata resolution and artifact-repository inspection
+  instead of appearing frozen while network or SSH work is captured.
 - Refuse `apply` when the lock is absent or stale instead of resolving and
   downloading implicitly.
 

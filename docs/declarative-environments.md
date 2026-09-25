@@ -1,30 +1,60 @@
 # Declarative environments
 
-The `1.1` pre-release replaces the transport-oriented snapshot experiment with
-a small portable configuration plus a pload-managed lock. Users describe the
-desired state; pload discovers resources, chooses a deterministic plan and
-materializes that state.
+The `1.2` preview treats reproduction as resource scheduling, not as a sequence
+of commands the user must design. You carry one small `pload.toml`; pload
+resolves exact versions, inventories available resources, saves an auditable
+route for every package, and executes exactly those routes.
 
-```console
-pload describe v2 -o pload.toml
-pload lock pload.toml
-pload plan pload.toml
-pload apply pload.toml
+```text
+pload.toml (intent)
+       │
+       ▼
+metadata-only resolution ──► .pload_lock.toml (exact graph and wheel identities)
+       │
+       ▼
+local/remote inventory ─────► .pload_plan.toml (one chosen route per package)
+       │
+       ▼
+pload apply ────────────────► environment matching the lock
 ```
 
-`describe` is the bridge for an existing environment. For a new project,
-`pload.toml` may be written by hand with names, ranges or exact
-`NAME==VERSION` requirements; `lock` produces the managed lock.
+The normal workflow is:
 
-## Two files, two responsibilities
+```console
+pload plan pload.toml       # resolve metadata, inventory and choose routes
+pload apply pload.toml      # execute only the saved plan
+```
 
-`pload.toml` is the file a user reads and edits. It contains only the desired
-Python, direct dependency requirements, target platform, policies and resource
-providers. For example:
+In a terminal, `plan` opens a route chooser. A number selects a route; Enter or
+`n` moves forward, `p` goes back, `u` undoes, `r` restores the fastest choices,
+`s` saves, and `a` saves then applies. Use `pload plan --no-ui` in CI. Use
+`--json` for machine-readable inspection.
+
+## Three files, one user-owned file
+
+- `pload.toml` is portable user intent. This is the only file users edit.
+- `.pload_lock.toml` is pload-managed exact resolution data.
+- `.pload_plan.toml` is pload-managed execution data bound to that exact config
+  and lock.
+
+The two dotfiles exist because a request such as `torch` does not identify one
+version, dependency closure, wheel build, or byte sequence. The lock records
+those facts; the plan records where each exact artifact will come from. Editing
+`pload.toml` invalidates both through SHA-256 bindings. Deleting either managed
+file is safe: the next online `plan` regenerates it, although a new resolution
+may differ if an index changed.
+
+`plan` may request Simple API project pages and independent `<wheel>.metadata`
+files. It never requests a wheel body, invokes `pip download`, copies packages,
+or populates a cache. If an index does not expose independent Core Metadata,
+planning stops and suggests adding a metadata-capable source. `apply` never
+re-resolves, changes route, or publishes artifacts when a selected route fails.
+
+## Complete `pload.toml` reference
 
 ```toml
 schema = 1
-name = "llm-training"
+name = "training"
 
 [environment]
 python = "3.12.7"
@@ -39,441 +69,174 @@ nvidia_driver = ["550.90.07"]
 [policy]
 reproducibility = "exact"
 network = "allow"
-source_build = "fallback"
-publish_missing_artifacts = true
+source_build = "forbid"
+publish_missing_artifacts = false
 repositories = ["lab"]
 
-[sources.default]
+[sources.pypi]
 kind = "index"
 url = "https://pypi.org/simple"
+
+[sources.mirror]
+kind = "index"
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
 
 [repositories.lab]
 kind = "ssh"
 location = "frpxiaoxin:/home/tibless/pload-cloud"
 ```
 
-`pload lock` writes its decisions to `.pload_lock.toml` in the same directory:
+### Top level
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `schema` | integer, required | Configuration format; currently `1`. |
+| `name` | string, required | Default environment name used by `apply`. Allowed characters are letters, numbers, dots, underscores and hyphens. |
+
+### `[environment]`
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `python` | required | Exact target Python, including patch version. |
+| `implementation` | `"cpython"` | Required interpreter implementation. |
+| `system` | empty | Optional hard `platform.system()` constraint. |
+| `machine` | empty | Optional hard `platform.machine()` constraint. Common aliases such as `AMD64`/`x86_64` and `aarch64`/`arm64` are normalized. |
+| `dependencies` | `[]` | Direct requirements: names, ranges, or exact pins. Direct URLs and environment markers are rejected in schema 1. Transitive packages stay out of this user file. |
+
+An unpinned entry is intentional. During `plan`, pload selects the newest
+compatible dependency graph using only index metadata, then writes exact
+versions and wheel identities to the managed lock.
+
+### `[capabilities]`
+
+Every capability is an array of strings. `nvidia_driver` records observed
+driver versions for audit and future scheduling. pload does not install CUDA
+drivers. CUDA-enabled Python wheels can still be cached locally or remotely and
+reused exactly, which avoids repeatedly downloading large special builds.
+
+### `[policy]`
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `reproducibility` | `"exact"` | `exact` requires a locked wheel hash or a verified environment-copy route. `compatible` may install the locked version from an index when no exact artifact is known. |
+| `network` | `"allow"` | `offline` forbids index access and Python installation; local and configured SSH resources remain usable. CLI `--offline` can only make policy stricter. |
+| `source_build` | `"fallback"` | In compatible mode, `forbid` disallows source distributions. Exact wheel routes never build source. |
+| `publish_missing_artifacts` | `false` recommended | Retained for schema-1 compatibility but ignored by `apply`. Upload is always explicit through `pload remote add`. |
+| `repositories` | `[]` | Repositories to search while planning. Every name must have a matching repository table. This never authorizes upload. |
+
+### `[sources.NAME]`
+
+| Field | Meaning |
+| --- | --- |
+| `kind` | Must be `"index"`. |
+| `url` | Public HTTP(S) Simple API base URL. Credentials and query tokens are rejected from portable files. |
+
+Sources are searched for compatible wheel metadata. A mirror may serve wheel
+files but omit PEP 658/714 Core Metadata; in that case add a metadata-capable
+source such as PyPI. pload will not hide this limitation by downloading wheels
+during analysis.
+
+### `[repositories.NAME]`
+
+| Field | Meaning |
+| --- | --- |
+| `kind` | `"local"` or `"ssh"`. |
+| `location` | Local path, or `HOST:/absolute/path` using normal OpenSSH configuration. |
+
+Objects live at `objects/<sha256>` and searchable package records at
+`packages/<normalized-name>/<version>/<wheel>.json`. Credentials remain in the
+host's SSH agent/config, never in TOML.
+
+Configure providers separately, then back up selected packages explicitly:
+
+```console
+pload repo add lab frpxiaoxin:/home/tibless/pload-cloud -t ssh
+pload remote add torch --from v10 --remote lab
+pload remote add numpy==2.1.0 -f ./project/.venv -r lab
+```
+
+`remote add` reuses a matching original wheel when possible. If it is absent,
+the command may fetch that exact installed version from `--index`; this is an
+explicit storage operation, unlike `plan` and `apply`.
+
+## Managed lock reference
+
+`.pload_lock.toml` contains:
+
+| Field | Meaning |
+| --- | --- |
+| `schema` | Managed lock format, currently `1`. |
+| `configuration` | Sibling user configuration filename. |
+| `configuration_sha256` | Canonical digest that makes edited configs stale. |
+| `[environment].dependencies` | Complete exact transitive closure. |
+| `[[package]].name/version` | One exact resolved distribution. |
+| `[[package]].sources` | Source that supplied its metadata. |
+| `[[package.artifact]].filename` | Exact compatible wheel filename. |
+| `sha256` | Required wheel body identity. |
+| `tags` | Python/ABI/platform compatibility tags. |
+| `url` | Exact artifact URL selected from the Simple API. |
+| `size` | Advertised artifact bytes when the index supplies it. |
+| `metadata_sha256` | Hash of the independently fetched Core Metadata when supplied. |
+| `repositories` | Known repositories containing the object; policy repositories are also checked by hash. |
+
+Resolution honors `Requires-Python`, wheel tags, `Requires-Dist`, dependency
+markers, yanked releases, hashes and target Python/platform. A repository
+without independent metadata is reported as blocked instead of causing an
+analysis-time wheel download.
+
+## Managed plan reference
+
+`.pload_plan.toml` stores configuration and lock hashes, the Python action,
+readiness, and one route for every locked package:
 
 ```toml
 schema = 1
 configuration = "pload.toml"
 configuration_sha256 = "..."
-
-[environment]
-dependencies = ["numpy==2.1.3", "torch==2.5.0+cu121", "..."]
+lock_sha256 = "..."
+name = "training"
+ready = true
 
 [[package]]
-name = "torch"
-version = "2.5.0+cu121"
-sources = ["default"]
+name = "numpy"
+version = "2.2.1"
+method = "external-cache"
+location = "/Users/me/Library/Caches/pip/.../numpy-2.2.1.whl"
+status = "ready"
+estimated_seconds = 0.2
 
-[[package.artifact]]
-filename = "torch-2.5.0+cu121-cp312-cp312-linux_x86_64.whl"
+[package.artifact]
+filename = "numpy-2.2.1-cp312-cp312-macosx_14_0_arm64.whl"
 sha256 = "..."
-tags = ["cp312-cp312-linux_x86_64"]
-repositories = ["lab"]
+url = "https://files.pythonhosted.org/..."
 ```
 
-The lock is generated data, not a second user configuration. It records the
-complete transitive dependency closure, exact versions, wheel identities,
-SHA-256 hashes, compatibility tags and known artifact locations. The
-`configuration_sha256` binds it to the current `pload.toml`; editing the user
-configuration makes the old lock stale and the next explicit `pload lock`
-replaces it atomically. Commit both files when reproducibility matters, but normally edit
-only `pload.toml`.
-
-The lock is necessary for **exact** reproduction because a requirement such as
-`torch` or even `torch==2.8.0` does not uniquely identify all transitive versions
-or a particular wheel build. Package indexes change over time. The filename and
-SHA-256 in the lock let pload prove that a cached, cloud-hosted or downloaded
-artifact is the same byte sequence chosen originally. Deleting the lock is safe:
-the next online `pload lock` resolves a new one, but the result may differ.
-`plan` never regenerates it.
-
-Python runtimes and wheel bytes remain in caches, indexes or content-addressed
-repositories; the two TOML files contain only control information. Credentials
-are never stored in either file; SSH uses the existing SSH agent/configuration.
-`describe` writes both files automatically. URLs containing embedded
-credentials or query-string tokens are rejected; authentication belongs to the
-machine, not a shareable environment description.
-
-## Complete `pload.toml` field reference
-
-`pload.toml` has five user-facing logical parts. Unknown TOML fields are reserved
-for future schema versions and should not be relied upon. The generated lock
-format is documented separately below so it can be audited, not hand-maintained.
-
-### Top-level identity
-
-| Field | Type | Required | Meaning |
-| --- | --- | --- | --- |
-| `schema` | integer | yes | File-format version. The current and only accepted value is `1`. It is not the pload package version. |
-| `name` | string | yes | Default name used by `pload apply`. It must be 1–100 letters, numbers, dots, underscores or hyphens, starting with a letter or number. `apply --name` may override it without changing the file. |
-
-### `[environment]`: desired runtime state
-
-| Field | Type | Default | Meaning and enforcement |
-| --- | --- | --- | --- |
-| `python` | string | none; required | Exact Python version, currently including the patch component, such as `3.12.7`. The planner reuses a matching discovered interpreter or schedules an installation when network policy allows it. |
-| `implementation` | string | `"cpython"` | `sys.implementation.name`, normally `cpython` or `pypy`. `apply` rejects a different implementation. |
-| `system` | string | empty | Target `platform.system()`, such as `Linux`, `Darwin` or `Windows`. A non-empty value is a hard compatibility constraint. |
-| `machine` | string | empty | Target `platform.machine()`, such as `x86_64`, `AMD64`, `arm64` or `aarch64`. A non-empty value is a hard compatibility constraint. |
-| `dependencies` | array of strings | `[]` | Direct package requirements owned by the user. Entries may be names (`numpy`), version constraints (`pandas>=2,<3`) or exact pins (`numpy==2.1.3`). `plan` never replaces this list with transitive dependencies; resolved versions belong to `.pload_lock.toml`. Direct URLs and environment markers are intentionally rejected in schema 1. pip, setuptools and wheel bootstrap packages are omitted by `describe`. |
-
-The environment section is desired state, not a command sequence. Paths to a
-source virtual environment are never stored here, so the configuration remains
-portable. The current schema describes one target platform and one exact Python
-version; use separate files for different targets until multi-target locks exist.
-
-For example, this is a valid initial request:
-
-```toml
-dependencies = ["numpy", "pandas>=2,<3"]
-```
-
-`pload lock` asks pip under the requested interpreter to resolve these requirements
-and their transitive dependencies as compatible wheels. It then atomically writes
-exact `NAME==VERSION` results, wheel filenames, SHA-256 hashes and tags to
-`.pload_lock.toml`; `pload.toml` remains unchanged. Resolution uses all declared
-indexes, with `default` as the primary index. It requires network access once;
-`lock --offline` rejects unavailable resolver inputs rather than guessing.
-`plan` is always read-only and never runs the resolver.
-
-Editing dependencies after a lock exists is also supported. For example, adding
-`"torch"` to a configuration with an existing `.pload_lock.toml` marks that lock
-as stale. The next online `pload lock` resolves the complete
-requested set—including existing exact constraints—rather than rejecting the
-file or silently dropping the new package. The resolver receives the pload wheel
-cache as a local candidate source, so compatible cached wheels are preferred and
-only missing artifacts need index access. The reconciled complete lock replaces
-the old one atomically.
-
-Configurations produced by pre-`1.1.0a8` previews may still contain embedded
-`[[package]]` tables. The first `pload lock` migrates those tables to
-`.pload_lock.toml` without downloading again and rewrites `pload.toml` in the
-clean declaration-only format. Because older previews replaced the original
-direct requirements with the complete closure, they cannot always recover which
-packages the user originally typed; those exact requirements remain valid and
-can be simplified manually afterward.
-
-### `[capabilities]`: observed non-Python context
-
-Each capability is an array of strings. `describe` currently recognizes
-`nvidia_driver` and records the driver versions reported by `nvidia-smi`:
-
-```toml
-[capabilities]
-nvidia_driver = ["550.90.07"]
-```
-
-Capabilities are provenance and planning information, not installable Python
-artifacts. The current executor does not install, downgrade or require an exact
-NVIDIA driver match. CUDA-enabled wheels are locked separately under
-`[[package.artifact]]`; drivers and system libraries remain host responsibilities.
-Unknown capability keys are preserved by the parser as arrays of strings but do
-not affect planning in schema 1.
-
-### `[policy]`: permitted ways to reach the desired state
-
-| Field | Allowed values / type | Default | Meaning |
-| --- | --- | --- | --- |
-| `reproducibility` | `"exact"` or `"compatible"` | `"exact"` | `exact` requires a declared wheel identity and SHA-256 for every package. `compatible` keeps exact versions but may obtain a new artifact build from an index. |
-| `network` | `"allow"` or `"offline"` | `"allow"` | Controls internet index access and automatic Python installation. `offline` still permits configured local and SSH repositories. CLI `--offline` can only make a run stricter; it cannot override an offline file to allow internet access. |
-| `source_build` | `"fallback"` or `"forbid"` | `"fallback"` | Applies to compatible re-resolution. `forbid` passes `--only-binary=:all:`; `fallback` allows pip to use an sdist when no wheel exists. Exact mode always installs the locked wheel and never rebuilds it. |
-| `publish_missing_artifacts` | boolean | `true` | After `apply` obtains exact wheels, publish their SHA-addressed bytes to every repository named by `policy.repositories`. `false` makes those repositories read-only candidates for this configuration. |
-| `repositories` | array of strings | `[]` | Logical repository names preferred for lookup and optional automatic publication. Every name must have a matching `[repositories.NAME]` table. This is a candidate set, not a user-visible upload sequence. |
-
-Command-line `--offline` is intentionally one-way: it prevents a configuration
-from unexpectedly using the internet, while a file declaring `network =
-"offline"` cannot be weakened accidentally by omitting the flag.
-
-Changing `environment.python` does not make native wheels portable. During
-planning, pload parses every locked wheel filename and compares its Python, ABI
-and platform tags with the requested runtime. For example, a cached `cp39-cp39`
-wheel is rejected for Python 3.8 even when its checksum is valid. Under `exact`,
-that makes the plan unavailable; under `compatible`, the planner may select an
-explicit `index-resolve / network` route for that package. Universal wheels such
-as `py3-none-any` can still be reused. `apply` never silently treats an
-incompatible cached wheel as ready.
-
-### `[sources.NAME]`: Python package indexes
-
-`NAME` is a logical identifier used by package locks, for example `default` or
-`pytorch-cu121`:
-
-```toml
-[sources.pytorch-cu121]
-kind = "index"
-url = "https://download.pytorch.org/whl/cu121"
-```
-
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `kind` | string | Must be `"index"` in schema 1. |
-| `url` | string | HTTP(S) Simple API base URL. Embedded usernames, passwords and query parameters are rejected because this file is intended to be shared. Configure authentication on the machine instead. |
-
-Source names must follow the same safe-name rules as the environment name. A
-package lists its allowed source names in `package.sources`. In compatible mode,
-the first listed source is the primary resolver source. In exact mode, an index
-is accepted only if it returns the declared wheel filename and its bytes match
-the declared SHA-256.
-
-### `[repositories.NAME]`: reusable artifact stores
-
-Repositories store immutable bytes by content hash rather than by environment:
-
-```toml
-[repositories.lab]
-kind = "ssh"
-location = "frpxiaoxin:/home/tibless/pload-cloud"
-
-[repositories.shared-disk]
-kind = "local"
-location = "./pload-artifacts"
-```
-
-| Field | Allowed values | Meaning |
-| --- | --- | --- |
-| `kind` | `"local"` or `"ssh"` | Selects filesystem copying or OpenSSH/SFTP transport. |
-| `location` | path or `HOST:/absolute/path` | A local absolute path, a path relative to the TOML file's directory, or an SSH alias/host plus absolute remote directory. SSH paths cannot contain spaces or `..`; `/` itself is rejected. |
-
-The physical layout is `objects/<sha256>`. SSH credentials, host keys, ports,
-proxies and jump hosts remain in normal OpenSSH configuration. The remote host
-must provide a POSIX shell and `sha256sum`. Repository names referenced by a
-policy or artifact must exist in this file. Missing or unreachable providers are
-removed from the plan and another valid route is tried.
-
-The TOML control file may itself be versioned in Git or hosted on GitHub. Large
-wheel bytes should remain in these content-addressed local/SSH repositories rather
-than being committed to Git.
-
-## Complete `.pload_lock.toml` field reference
-
-The lock's top-level `schema` is currently `1`. `configuration` names the sibling
-user configuration and `configuration_sha256` identifies its canonical content.
-`[environment].dependencies` contains the complete, sorted exact dependency
-closure selected by the resolver. These fields let pload distinguish a reusable
-lock from one made stale by editing or renaming the configuration.
-
-### `[[package]]`: one resolved package
-
-There is one array entry for every application dependency:
-
-| Field | Type | Required | Meaning |
-| --- | --- | --- | --- |
-| `name` | string | yes | Distribution name from installed metadata. Comparison is normalized according to Python package-name rules, so `python_dateutil` and `python-dateutil` identify the same project. |
-| `version` | string | yes | Exact installed version, including a local suffix such as `+cu121` when present. |
-| `sources` | array of strings | no | Logical `[sources.NAME]` entries allowed to satisfy this package. Each referenced source must exist. `describe -s PACKAGE=URL` creates a package-specific source when installed metadata cannot reliably reveal it. |
-| `artifact` | array of tables | no | Exact wheel identities accepted for this package. Exact policy needs at least one reachable artifact route; compatible policy may omit artifacts and re-resolve the pinned version. |
-
-Users should not add or remove these records manually. Delete `.pload_lock.toml`
-and run `pload lock` when a complete re-resolution is wanted.
-
-### `[[package.artifact]]`: exact wheel identity
-
-An artifact table belongs to the immediately preceding `[[package]]` entry:
-
-| Field | Type | Required | Meaning |
-| --- | --- | --- | --- |
-| `filename` | string | yes | Exact wheel filename, including Python, ABI and platform tags. Source archives are not accepted as exact artifacts. |
-| `sha256` | string | yes | Lowercase 64-character SHA-256 digest of the complete wheel. Every cache, repository and index retrieval is checked against it before installation. |
-| `tags` | array of strings | no | Wheel compatibility tags extracted from the filename, such as `cp312-cp312-linux_x86_64` or `py3-none-any`. They are recorded for inspection; pip remains the final wheel-compatibility validator. |
-| `repositories` | array of strings | no | Repositories known to contain this digest. The planner also checks repositories listed globally in `policy.repositories`, allowing newly cached objects to be reused without rewriting the package entry. |
-
-The schema permits more than one artifact entry for future multi-platform locks,
-but schema 1 `describe` emits one artifact for the described target and the
-environment's OS/architecture remain hard constraints. A hash proves byte
-identity and detects corruption; it does not establish that a repository owner or
-package is trustworthy.
-
-### Minimal hand-written compatible configuration
-
-This is the smallest practical file that asks pload to resolve pinned packages
-online without claiming byte-for-byte wheel reproducibility:
-
-```toml
-schema = 1
-name = "analysis"
-
-[environment]
-python = "3.12.7"
-dependencies = ["numpy==2.1.3", "pandas==2.2.3"]
-
-[policy]
-reproducibility = "compatible"
-network = "allow"
-source_build = "forbid"
-publish_missing_artifacts = false
-
-[sources.default]
-kind = "index"
-url = "https://pypi.org/simple"
-```
-
-`implementation`, `system`, `machine`, `capabilities` and `repositories` are
-filled or omitted according to the defaults described above. `.pload_lock.toml`
-is generated separately. For durable sharing, commit both files and prefer
-`pload describe` so exact package and artifact identity is captured rather than
-inferred.
-
-## Describe an existing environment
-
-```console
-pload describe v2
-pload describe /project/.venv -o project.pload.toml
-pload describe /project/.venv/bin/python -o project.pload.toml
-```
-
-The default `exact` mode obtains one wheel for every application package,
-computes its SHA-256, places it in the shared cache and automatically publishes
-it to the first configured local/SSH artifact repository. The repository is
-declared in `pload.toml`; the artifact-to-repository association is recorded in
-`.pload_lock.toml`.
-
-Use a specific configured repository when necessary:
-
-```console
-pload describe v2 -r lab
-```
-
-Installed metadata does not always preserve the original package index. Record a
-dedicated source explicitly for packages such as CUDA-enabled PyTorch; repeat the
-option for multiple packages:
-
-```console
-pload describe v2 \
-  -s torch=https://download.pytorch.org/whl/cu121 \
-  -s torchvision=https://download.pytorch.org/whl/cu121
-```
-
-If a package has no compatible wheel, exact description stops instead of quietly
-claiming reproducibility. `--mode compatible` records exact versions but permits
-a future machine to re-resolve their artifacts:
-
-```console
-pload describe v2 --mode compatible
-```
-
-Compatible mode is useful for exploration, but it is weaker than an artifact lock.
-
-## Lock the declared dependencies
-
-```console
-pload lock
-pload lock project.pload.toml
-pload lock project.pload.toml --offline
-```
-
-`lock` is the explicit boundary at which pload may invoke pip, resolve the full
-dependency closure, obtain wheel bytes, populate the local cache and atomically
-write `.pload_lock.toml`. It does not modify `pload.toml`. Run it after changing
-Python, dependencies, indexes or any other resolution input. Keeping this as a
-separate command prevents a read-only preview from changing the resources it is
-supposed to inspect.
-
-## Plan against available resources
-
-```console
-pload plan
-pload plan project.pload.toml
-pload plan --offline
-pload plan --json
-```
-
-`plan` is strictly read-only. It never invokes pip, downloads a package, fills
-the cache, writes a lock or changes the user configuration. If
-`.pload_lock.toml` is absent or its configuration digest is stale, the plan is
-not ready: direct requirements are shown as `lock-required / pending` and the
-user is told to run `pload lock`. This is intentionally different from a route
-that only happens to become ready because planning downloaded it.
-
-With a current lock, the planner inventories:
-
-1. installed and discoverable Python interpreters;
-2. the pload wheel cache;
-3. an `artifacts/` directory beside the configuration;
-4. content-addressed local and SSH repositories named in the file;
-5. package indexes named in the file;
-6. target OS, architecture and Python implementation.
-
-The Python row and package rows describe separate resources. A plan may reuse
-every package from cache while still showing `Python: install-python · ... ·
-network`; in that case the download is the Python runtime itself. `reuse-python ·
-... · ready` means no runtime download is planned.
-
-It first rejects candidates that violate hard requirements. Remaining candidates
-are ordered lexicographically by reproducibility loss, compatibility risk,
-network acquisition, execution cost and a deterministic tie-breaker. This avoids
-fragile arbitrary totals where a cheap but incompatible resource could win merely
-by accumulating points.
-
-The current first implementation chooses per-package routes and deduplicates
-artifacts by SHA-256. A later global optimizer can combine connections, builds and
-downloads across packages without changing the file format.
-
-## Apply desired state
-
-```console
-pload apply
-pload apply project.pload.toml
-pload apply project.pload.toml -n project-copy
-pload apply project.pload.toml --offline
-```
-
-`apply` performs the internal operations that were previously exposed as export,
-push, pull and restore:
-
-1. require a current `.pload_lock.toml` and refuse implicit re-resolution;
-2. resolve or install the declared Python;
-3. verify implementation, exact Python version, OS and architecture;
-4. reuse exact local artifacts;
-5. retrieve missing SHA-addressed artifacts from configured repositories;
-6. fall back to an index only when policy permits it;
-7. verify every artifact before installation;
-8. create and register the environment;
-9. install exact packages and run `pip check`;
-10. record the applied configuration digest inside the environment.
-
-Running `apply` again is idempotent when the environment already carries the same
-configuration digest. If the name exists with different state, pload refuses to
-overwrite it. Destructive replacement is deliberately not implicit. If package
-installation or verification fails, the newly created environment and registry
-entry are rolled back; an existing environment is never modified.
-
-## Resource storage
-
-Local and SSH artifact repositories store bytes at:
-
-```text
-objects/<sha256>
-```
-
-Two configurations referencing the same large CUDA wheel therefore store and
-transfer one object. `.pload_lock.toml` contains the checksum and logical
-repository name; the user does not run upload/download commands. A missing or
-unreachable provider is simply removed from the candidate set, and apply tries
-the next valid route.
-
-## Compatibility and boundaries
-
-- Exact locks are platform-specific unless the wheel is universal.
-- A different OS, architecture or exact Python patch version currently requires
-  a separately described configuration. Multi-target locks are planned.
-- Detected NVIDIA driver versions are recorded as capability provenance. Drivers
-  and system libraries are not installed by pload and are not backed up as if
-  they were Python artifacts.
-- CUDA-enabled Python wheels are ordinary locked artifacts and can be cached in
-  the content repository. This preserves the large, slow-to-download package even
-  though the host driver remains the machine administrator's responsibility.
-- Native Conda packages require a future Conda provider; they are not silently
-  converted to pip packages.
-- Package installation may execute code. Only use configurations and providers
-  you trust; checksums prove identity, not trustworthiness.
-
-## Abandoned snapshot experiment
-
-The earlier `export → repo push/pull → restore` interface is not the public model
-for 1.1. Its useful internals—probing, hashing, caches and content-addressed SSH
-storage—remain providers behind `describe`, `plan` and `apply`. Before a stable
-release, the experimental format was abandoned and is intentionally not carried
-forward.
+| Method | Meaning |
+| --- | --- |
+| `cache` | Exact SHA-matching wheel in pload's cache. |
+| `configuration-artifact` | Exact wheel under the configuration's `artifacts/`. |
+| `external-cache` | Exact wheel in configured or common pip/uv cache roots. |
+| `environment-copy` | Exact installed distribution from a compatible pload environment, guarded by its `RECORD` fingerprint. Packages with files outside site-packages are excluded. |
+| `repository` | SHA-addressed object from a local/SSH store. |
+| `index-exact` | Exact locked URL, downloaded only during apply and verified by SHA-256. |
+| `index-resolve` | Compatible-mode fallback for the already locked version. |
+
+Automatic ranking minimizes expected time: existing bytes first, compatible
+local environments next, repositories next, and indexes last. The chooser can
+override it. If the chosen resource changes or disappears, `apply` stops and
+asks for a new plan; it never tries another candidate.
+
+## Current boundaries
+
+- Wheel reuse requires matching Python, ABI, OS and architecture tags.
+- Environment copying additionally requires exact Python implementation,
+  version, OS, architecture and an unchanged installed `RECORD` fingerprint.
+- Conda native libraries, system packages and GPU drivers are context, not
+  installed by the schema-1 executor.
+- Source builds, editable installs and arbitrary direct URLs cannot currently
+  provide the same byte-for-byte guarantees as locked wheels.
+- Index authentication is machine configuration; portable TOML never embeds
+  secrets.
+
+These boundaries are reported explicitly. They are never converted into an
+unplanned download, fallback route, upload, or silent partial environment.

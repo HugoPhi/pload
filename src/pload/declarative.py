@@ -131,7 +131,7 @@ def dump_manifest(data):
         f"network = {_quoted(policy.get('network', 'allow'))}",
         f"source_build = {_quoted(policy.get('source_build', 'fallback'))}",
         "publish_missing_artifacts = " +
-        ("true" if policy.get("publish_missing_artifacts", True) else "false"),
+        ("true" if policy.get("publish_missing_artifacts", False) else "false"),
     ]
     repositories = policy.get("repositories", [])
     if repositories:
@@ -256,7 +256,7 @@ def load_manifest(path):
         policy.setdefault("reproducibility", "exact")
         policy.setdefault("network", "allow")
         policy.setdefault("source_build", "fallback")
-        policy.setdefault("publish_missing_artifacts", True)
+        policy.setdefault("publish_missing_artifacts", False)
         policy.setdefault("repositories", [])
     for package in data["package"]:
         package.setdefault("sources", [])
@@ -281,7 +281,7 @@ def validate_manifest(data):
         raise PloadError("policy.network must be allow or offline")
     if policy.get("source_build", "fallback") not in {"fallback", "forbid"}:
         raise PloadError("policy.source_build must be fallback or forbid")
-    if not isinstance(policy.get("publish_missing_artifacts", True), bool):
+    if not isinstance(policy.get("publish_missing_artifacts", False), bool):
         raise PloadError("policy.publish_missing_artifacts must be true or false")
     policy_repositories = policy.get("repositories", [])
     if (not isinstance(policy_repositories, list)
@@ -716,7 +716,7 @@ class DeclarativeEnvironmentManager:
                 "reproducibility": mode,
                 "network": "allow",
                 "source_build": "fallback",
-                "publish_missing_artifacts": True,
+                "publish_missing_artifacts": False,
                 "repositories": [selected_repository] if selected_repository else [],
             },
             "sources": declared_sources,
@@ -730,7 +730,6 @@ class DeclarativeEnvironmentManager:
             "package": [],
         }
         self.cache.mkdir(parents=True, exist_ok=True)
-        publication = []
         with tempfile.TemporaryDirectory(prefix="pload-describe-") as temporary:
             wheel_dir = Path(temporary)
             for index_number, installed in enumerate(packages, 1):
@@ -756,27 +755,12 @@ class DeclarativeEnvironmentManager:
                         raise PloadError(f"conflicting cached artifact: {wheel.name}")
                     if not cached.exists():
                         shutil.copyfile(wheel, cached)
-                    locations = []
-                    if selected_repository:
-                        publication.append((cached, checksum))
                     artifact = {
                         "filename": wheel.name, "sha256": checksum,
-                        "tags": _wheel_tags(wheel.name), "repositories": locations,
+                        "tags": _wheel_tags(wheel.name), "repositories": [],
                     }
                     record["artifact"].append(artifact)
                 data["package"].append(record)
-        if selected_repository and publication:
-            if progress:
-                progress(
-                    f"Publishing {len(publication)} locked artifacts to "
-                    f"{selected_repository}"
-                )
-            ArtifactRepository.publish_many(
-                repositories[selected_repository], publication, output.parent,
-            )
-            for package in data["package"]:
-                for artifact in package.get("artifact", []):
-                    artifact["repositories"].append(selected_repository)
         validate_manifest(data)
         output.parent.mkdir(parents=True, exist_ok=True)
         self._write_manifest(output, data)

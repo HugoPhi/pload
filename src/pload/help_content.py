@@ -55,15 +55,13 @@ Use `pload cfg` to see the exact effective paths before creating anything.
 
 ```console
 $ pload describe v1 -o pload.toml
-$ pload lock pload.toml
 $ pload plan pload.toml
 $ pload apply pload.toml
 ```
 
-`pload.toml` describes user intent and `.pload_lock.toml` records exact package
-artifacts. `plan` is strictly read-only. `lock` is the explicit operation that
-resolves dependencies and may download artifacts; `apply` only accepts a current
-lock and materializes its selected routes.
+`pload.toml` describes user intent. `plan` resolves from independent metadata,
+inventories resources and saves one route per package without downloading wheel
+bodies. `apply` executes only that saved plan and never changes route or uploads.
 """,
     ("new",): r"""
 # Create a managed environment
@@ -356,9 +354,8 @@ pload describe v2 -s torch=https://download.pytorch.org/whl/cu121
 ```
 
 The default exact mode locks every installed application package to an actual
-wheel and SHA-256. pload reuses its local cache, downloads a missing wheel when
-necessary, and publishes it to the selected configured local/SSH repository.
-These are internal resource operations: the user receives one TOML file.
+wheel and SHA-256. pload reuses its local cache and may obtain a missing wheel,
+but does not upload it. Use `pload remote add PACKAGE` for explicit backup.
 
 Use `--mode compatible` only when exact wheels do not exist and future
 re-resolution is acceptable. Native Conda packages are not silently converted.
@@ -374,15 +371,14 @@ pload plan
 pload plan project.pload.toml
 pload plan --offline
 pload plan --json
+pload plan --no-ui
 ```
 
-Planning reads the configuration, discovers Python interpreters and checks local
-caches, adjacent artifacts and content-addressed repositories.
-Incompatible resources are rejected first; valid routes are ordered by exactness,
-compatibility risk, transfer, execution cost and a deterministic tie-breaker.
-It never invokes pip, downloads packages, writes a lock or changes either TOML
-file. A missing or stale lock is reported as `lock-required / pending`; run
-`pload lock` explicitly before planning exact resource routes.
+Planning resolves missing/stale locks using Simple API pages and independent
+Core Metadata, then checks pload/pip/uv caches, compatible environments,
+adjacent artifacts and content-addressed repositories. It never downloads a
+wheel body. In a terminal the chooser supports previous/next, undo, reset,
+save, and save-and-apply; `--no-ui` selects the fastest routes for automation.
 """
 GUIDES[("lock",)] = r"""
 # Resolve the user declaration into an exact managed lock
@@ -393,11 +389,9 @@ pload lock project.pload.toml
 pload lock --offline
 ```
 
-Locking is an explicit mutating operation. It resolves direct and transitive
-dependencies for the configured Python, obtains exact wheels when necessary,
-computes SHA-256 identities and atomically writes `.pload_lock.toml` beside the
-configuration. `pload.toml` is never rewritten. Run it after changing Python,
-dependencies, sources or another resolution input.
+This legacy explicit command is retained for preview compatibility. The normal
+workflow is now `pload plan`, whose metadata-only resolver writes the managed
+lock without obtaining wheel bodies. Prefer `plan` for new configurations.
 """
 GUIDES[("apply",)] = r"""
 # Materialize the configuration
@@ -408,10 +402,10 @@ pload apply project.pload.toml -n project-copy
 pload apply --offline
 ```
 
-Apply requires a current `.pload_lock.toml`, then installs Python when needed,
-obtains exact artifacts through the selected
-resource routes, verifies hashes, creates the environment, installs packages and
-runs `pip check`. It never silently resolves or updates a stale lock. Reapplying
+Apply requires a current `.pload_lock.toml` and `.pload_plan.toml`, then installs
+Python when needed, executes each selected route, verifies hashes, creates the
+environment, installs packages and runs `pip check`. It never resolves, tries an
+alternative route, or uploads package bytes. Reapplying
 the same configuration is idempotent; an
 existing environment with different state is never silently overwritten.
 """

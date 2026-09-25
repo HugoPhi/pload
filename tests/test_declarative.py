@@ -498,10 +498,12 @@ def test_describe_plan_apply_through_content_repository(tmp_path):
     assert data["sources"]["default"]["url"] == "https://example.invalid/simple"
     assert locked["package"][0]["sources"] == ["package-pload-demo"]
     assert data["sources"]["package-pload-demo"]["url"].endswith("/cu121")
-    assert artifact["repositories"] == ["lab"]
+    assert artifact["repositories"] == []
+    assert not (repository / "objects" / artifact["sha256"]).exists()
+    manager.publish_package("pload-demo", "source", "lab")
     assert (repository / "objects" / artifact["sha256"]).is_file()
     assert any("Locking pload-demo==1.0" in item for item in describe_progress)
-    assert any("Publishing 1 locked artifact" in item for item in describe_progress)
+    assert not any("Publishing" in item for item in describe_progress)
 
     shutil.rmtree(source_config.home / "cache")
     target_config = ConfigManager(home=tmp_path / "target-home")

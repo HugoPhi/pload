@@ -78,22 +78,27 @@ profile when `--shell` is supplied or already configured.
 
 ## Reproduce and share environments
 
-The `1.1` pre-release uses a clean, user-authored `pload.toml` as the portable
-source of truth and writes exact resolver output to the sibling
-`.pload_lock.toml`. The user declares the desired environment; pload inventories local caches,
-configured local/SSH content stores, package indexes and Python installations,
-then performs transfers and installation internally:
+The `1.2` preview uses one clean, user-authored `pload.toml` as portable intent.
+pload manages `.pload_lock.toml` (exact versions and artifacts) and
+`.pload_plan.toml` (the selected acquisition route for every package):
 
 ```console
 pload describe v2 -o pload.toml
-pload lock pload.toml
 pload plan pload.toml
 pload apply pload.toml
 ```
 
-`plan` is strictly read-only: it never invokes pip, downloads packages, or
-changes either TOML file. Run `lock` explicitly after editing dependencies;
-`apply` refuses a missing or stale lock instead of resolving behind your back.
+`plan` fetches only index pages and independent package metadata—never wheel
+bodies—and inventories pload/pip/uv caches, compatible existing environments,
+local/SSH stores and indexes. Its interactive chooser supports previous/next,
+undo, reset, save and save-and-apply. `apply` executes exactly the saved plan:
+it never re-resolves, changes route, falls back, or uploads packages.
+
+Back up a special or slow wheel only when you explicitly request it:
+
+```console
+pload remote add torch --from v10 --remote lab
+```
 
 See the [declarative environment guide](docs/declarative-environments.md) for the
 [complete TOML field reference](docs/declarative-environments.md#complete-ploadtoml-field-reference),
@@ -119,7 +124,7 @@ pload-install --yes --package-spec "pload==1.0.0"
 To opt into the declarative-environment pre-release for testing:
 
 ```console
-pload-install --yes --package-spec "pload==1.1.0a10"
+pload-install --yes --package-spec "pload==1.2.0a1"
 ```
 
 To always follow the newest published release instead of pinning a version,

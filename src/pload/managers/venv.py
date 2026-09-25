@@ -163,8 +163,8 @@ class VenvManager:
         self._write_registry(data)
         return entry
 
-    def environments(self):
-        """Return registered environments and import legacy managed environments."""
+    def environments(self, register_discovered=True):
+        """Return known environments, optionally without importing discovered ones."""
         data = self._read_registry()
         registered_paths = {
             str(Path(entry.get("path", "")).expanduser().resolve())
@@ -172,16 +172,23 @@ class VenvManager:
             if entry.get("path")
         }
         root = self.config.venv_path
+        transient = []
         if root.is_dir():
             for child in sorted(root.iterdir(), key=lambda item: item.name.lower()):
                 resolved = str(child.resolve())
                 if self._valid_environment(child) and resolved not in registered_paths:
-                    self.register_environment(child, name=child.name)
+                    if register_discovered:
+                        self.register_environment(child, name=child.name)
+                    else:
+                        transient.append({
+                            "id": f"path:{child.name}", "name": child.name,
+                            "path": resolved, "description": "", "created_at": "",
+                        })
                     registered_paths.add(resolved)
 
         data = self._read_registry()
         result = []
-        for entry in data["environments"]:
+        for entry in data["environments"] + transient:
             path = Path(entry.get("path", "")).expanduser()
             if self._valid_environment(path):
                 item = dict(entry)

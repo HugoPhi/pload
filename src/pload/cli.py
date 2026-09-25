@@ -486,6 +486,10 @@ def print_declarative_plan(plan):
                 table.add_row(package["name"], package["version"], "—", "unavailable",
                               "No resource satisfies the configuration")
     console.print(table)
+    console.print(
+        "[dim]Saved acquisition choices:[/] "
+        f"[cyan]{plan['plan_path']}[/]"
+    )
 
 
 def _print_spaced_section(console, renderable):

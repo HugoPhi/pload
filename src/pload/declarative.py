@@ -7,8 +7,10 @@ import platform
 import re
 import shlex
 import shutil
+import sys
 import tempfile
 import uuid
+import zipfile
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -25,6 +27,7 @@ from pload.errors import PloadError
 from pload.managers.platform import PythonNotFoundError
 from pload.managers.pyversion import PythonManager
 from pload.managers.venv import VenvManager
+from pload.resource_plan import file_digest, load_plan, write_plan
 from pload.snapshots import RepositoryManager, digest, execute, probe, public_index, safe_name
 
 PIN = re.compile(r"([A-Za-z0-9][A-Za-z0-9_.-]*)==([A-Za-z0-9][A-Za-z0-9_.+!-]*)")
@@ -532,6 +535,67 @@ class DeclarativeEnvironmentManager:
         self.config = config
         self.cache = config.home / "cache" / "wheels"
 
+    def _external_cache_roots(self):
+        """Return package cache roots without creating or changing them."""
+        configured = self.config.settings.get("resource_cache_dirs")
+        if configured is not None:
+            values = configured
+        elif os.environ.get("PLOAD_RESOURCE_CACHE_DIRS"):
+            values = os.environ["PLOAD_RESOURCE_CACHE_DIRS"].split(os.pathsep)
+        elif sys.platform == "win32":
+            local = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local"))
+            values = [local / "pip/Cache", local / "uv/cache"]
+        elif sys.platform == "darwin":
+            values = [Path.home() / "Library/Caches/pip", Path.home() / "Library/Caches/uv"]
+        else:
+            cache_home = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
+            values = [cache_home / "pip", cache_home / "uv"]
+        roots = []
+        for value in values:
+            root = Path(value).expanduser()
+            if root.is_dir() and root.resolve() != self.cache.resolve():
+                roots.append(root.resolve())
+        return list(dict.fromkeys(roots))
+
+    @staticmethod
+    def _find_external_artifact(roots, artifact):
+        """Find an exact wheel in known caches; matching a name alone is insufficient."""
+        for root in roots:
+            try:
+                matches = root.rglob(artifact["filename"])
+                for candidate in matches:
+                    if candidate.is_file() and digest(candidate) == artifact["sha256"]:
+                        return candidate
+            except OSError:
+                continue
+        return None
+
+    def _environment_resources(self, expected, progress=None):
+        """Index exact, safely copyable distributions in compatible pload environments."""
+        resources = {}
+        for environment in VenvManager(self.config).environments(register_discovered=False):
+            root = Path(environment["path"])
+            interpreter = root / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+            try:
+                runtime = probe(interpreter)
+            except PloadError:
+                continue
+            if any(runtime.get(key) != expected.get(key) for key in
+                   ("python", "implementation", "system", "machine")):
+                continue
+            if progress:
+                progress(f"Inspecting packages in environment {environment['id']}")
+            for package in runtime.get("packages", []):
+                if not package.get("copyable") or not package.get("record_sha256"):
+                    continue
+                key = (normalized_name(package["name"]), package["version"])
+                resources.setdefault(key, []).append({
+                    "path": str(root),
+                    "fingerprint": package["record_sha256"],
+                    "id": environment["id"],
+                })
+        return resources
+
     def describe(
         self, source, output, name=None, mode="exact", repository=None, sources=None,
         progress=None,
@@ -937,10 +1001,15 @@ class DeclarativeEnvironmentManager:
                     "alternatives": [],
                     "rejections": [],
                 })
-            return {
+            result = {
                 "path": str(path), "name": data["name"], "python": python_action,
                 "packages": pending, "ready": False, "lock": lock,
             }
+            result["plan_path"] = str(write_plan(
+                path, configuration_digest(data),
+                file_digest(sidecar) if sidecar.is_file() else "", result,
+            ))
+            return result
         repository_checksums = {}
         for package in packages:
             for artifact in package.get("artifact", []):
@@ -964,6 +1033,10 @@ class DeclarativeEnvironmentManager:
                 )
             except PloadError:
                 repository_objects[repo_name] = set()
+        external_cache_roots = self._external_cache_roots()
+        environment_resources = self._environment_resources(
+            data["environment"], progress=progress,
+        )
         plans = []
         for package in packages:
             candidates = []
@@ -990,6 +1063,11 @@ class DeclarativeEnvironmentManager:
                     candidates.append(self._candidate(
                         "configuration-artifact", adjacent, "ready", (0, 0, 0, 1), artifact
                     ))
+                external = self._find_external_artifact(external_cache_roots, artifact)
+                if external:
+                    candidates.append(self._candidate(
+                        "external-cache", external, "ready", (0, 0, 0, 2), artifact
+                    ))
                 repo_names = dict.fromkeys(
                     artifact.get("repositories", []) + preferred_repositories
                 )
@@ -1008,6 +1086,14 @@ class DeclarativeEnvironmentManager:
                                 "index-exact", source_name, "network",
                                 (0, 0, 2, source_name), artifact,
                             ))
+            environment_key = (normalized_name(package["name"]), package["version"])
+            for resource in environment_resources.get(environment_key, []):
+                candidate = self._candidate(
+                    "environment-copy", resource["path"], "ready",
+                    (0, 0, 0, 3, resource["id"]),
+                )
+                candidate["fingerprint"] = resource["fingerprint"]
+                candidates.append(candidate)
             if policy.get("reproducibility") == "compatible" and network_allowed:
                 source_name = (package.get("sources") or ["default"])[0]
                 candidates.append(self._candidate(
@@ -1022,13 +1108,27 @@ class DeclarativeEnvironmentManager:
             })
         ready = (not lock_required and python_action["status"] != "unavailable"
                  and all(item["selected"] for item in plans))
-        return {"path": str(path), "name": data["name"], "python": python_action,
-                "packages": plans, "ready": ready, "lock": lock}
+        result = {"path": str(path), "name": data["name"], "python": python_action,
+                  "packages": plans, "ready": ready, "lock": lock}
+        result["plan_path"] = str(write_plan(
+            path, configuration_digest(data), file_digest(sidecar), result,
+        ))
+        return result
 
     @staticmethod
     def _candidate(method, location, status, cost, artifact=None):
         result = {"method": method, "location": str(location), "status": status,
                   "cost": list(cost)}
+        result["estimated_seconds"] = {
+            "cache": 0.05,
+            "configuration-artifact": 0.1,
+            "external-cache": 0.2,
+            "environment-copy": 0.5,
+            "repository": 5.0,
+            "index-exact": 30.0,
+            "index-resolve": 45.0,
+            "lock-required": 0.0,
+        }.get(method, 0.0)
         if artifact:
             result["artifact"] = artifact
         return result
@@ -1047,13 +1147,39 @@ class DeclarativeEnvironmentManager:
         return result
 
     def apply(self, manifest_path, name=None, offline=False, progress=None):
-        path, data, _, _ = self._load_state(manifest_path)
-        plan = self.plan(path, offline=offline, progress=progress)
-        if plan["lock"]["required"]:
+        path, data, current, _ = self._load_state(manifest_path)
+        if data["environment"].get("dependencies") and not current:
             raise PloadError(
-                "environment lock is missing or stale; review the configuration, then run "
-                f"'pload lock {path.name}'"
+                "environment lock is missing or stale; run pload plan after resolving metadata"
             )
+        lock_file = lock_path(path)
+        _, saved = load_plan(
+            path, configuration_digest(data),
+            file_digest(lock_file) if lock_file.is_file() else "",
+        )
+        self._validate_saved_plan(saved, data)
+        plan = {
+            "path": str(path), "name": saved["name"], "ready": saved["ready"],
+            "python": saved["python"], "packages": [],
+        }
+        for package in saved.get("package", []):
+            selected = None
+            if package["method"] != "unavailable":
+                selected = {
+                    "method": package["method"], "location": package["location"],
+                    "status": package["status"],
+                    "estimated_seconds": package.get("estimated_seconds", 0.0),
+                }
+                if package.get("fingerprint"):
+                    selected["fingerprint"] = package["fingerprint"]
+                if package.get("artifact"):
+                    selected["artifact"] = package["artifact"]
+            plan["packages"].append({
+                "name": package["name"], "version": package["version"],
+                "selected": selected, "alternatives": [],
+                "rejections": ([{"reason": package["reason"]}]
+                               if package.get("reason") else []),
+            })
         unavailable = [item for item in plan["packages"] if not item["selected"]]
         if unavailable:
             details = []
@@ -1081,8 +1207,8 @@ class DeclarativeEnvironmentManager:
                 return existing
             raise PloadError(f"environment {target_name!r} exists with different state")
         artifacts = []
-        locked_files = []
         compatible = []
+        environment_copies = []
         self.cache.mkdir(parents=True, exist_ok=True)
         repository_fetches = {}
         for package_plan in plan["packages"]:
@@ -1103,7 +1229,10 @@ class DeclarativeEnvironmentManager:
                 )
             except PloadError as exc:
                 if progress:
-                    progress(f"Batch fetch failed; trying fallback routes: {exc}")
+                    progress(
+                        "Batch fetch failed; retrying the same selected repository "
+                        f"route individually: {exc}"
+                    )
         with tempfile.TemporaryDirectory(prefix="pload-apply-") as temporary:
             stage = Path(temporary)
             for index_number, package_plan in enumerate(plan["packages"], 1):
@@ -1115,45 +1244,24 @@ class DeclarativeEnvironmentManager:
                 selected = package_plan["selected"]
                 artifact = selected.get("artifact")
                 if artifact:
-                    routes = [selected] + package_plan["alternatives"]
-                    failures = []
-                    acquired = None
-                    for route in routes:
-                        route_artifact = route.get("artifact")
-                        if not route_artifact:
-                            continue
-                        cached = self.cache / route_artifact["filename"]
+                    cached = self.cache / artifact["filename"]
+                    if not (cached.is_file() and digest(cached) == artifact["sha256"]):
                         try:
-                            if not (cached.is_file()
-                                    and digest(cached) == route_artifact["sha256"]):
-                                self._acquire(path, data, package_plan, route, cached, stage)
-                            if digest(cached) != route_artifact["sha256"]:
-                                raise PloadError("checksum mismatch")
+                            self._acquire(path, data, package_plan, selected, cached, stage)
                         except (OSError, PloadError) as exc:
-                            failures.append(f"{route['method']}: {exc}")
-                            continue
-                        acquired = (cached, route_artifact)
-                        break
-                    if not acquired:
-                        detail = failures[-1] if failures else "no artifact route"
-                        raise PloadError(
-                            f"cannot acquire {package_plan['name']}=={package_plan['version']}: {detail}"
-                        )
-                    cached, artifact = acquired
+                            raise PloadError(
+                                f"planned route failed for {package_plan['name']}=="
+                                f"{package_plan['version']} ({selected['method']}): {exc}; "
+                                "run pload plan to choose another route"
+                            ) from exc
+                    if digest(cached) != artifact["sha256"]:
+                        raise PloadError("planned artifact checksum mismatch")
                     artifacts.append(cached.resolve().as_uri() + "#sha256=" + artifact["sha256"])
-                    locked_files.append((cached, artifact["sha256"]))
                 else:
-                    compatible.append(package_plan)
-            if (locked_files
-                    and data["policy"].get("publish_missing_artifacts", True)):
-                for repo_name in data["policy"].get("repositories", []):
-                    if progress:
-                        progress(
-                            f"Publishing {len(locked_files)} locked artifacts to {repo_name}"
-                        )
-                    ArtifactRepository.publish_many(
-                        data["repositories"][repo_name], locked_files, path.parent,
-                    )
+                    if selected["method"] == "environment-copy":
+                        environment_copies.append(package_plan)
+                    else:
+                        compatible.append(package_plan)
             venvs = VenvManager(self.config)
             if progress:
                 progress(f"Creating environment {target_name}")
@@ -1166,6 +1274,8 @@ class DeclarativeEnvironmentManager:
                 if artifacts:
                     execute(pip + ["install", "--no-index", "--no-deps"] + artifacts,
                             capture=False)
+                for package_plan in environment_copies:
+                    self._copy_distribution(package_plan, env, stage)
                 for package_plan in compatible:
                     source_name = package_plan["selected"]["location"]
                     source = data.get("sources", {}).get(source_name, {})
@@ -1197,10 +1307,113 @@ class DeclarativeEnvironmentManager:
                 venvs.remove_venv(target_name)
                 raise
 
+    @staticmethod
+    def _validate_saved_plan(saved, data):
+        """Bind every executable route to one exact package in the current lock."""
+        locked = {
+            (normalized_name(package["name"]), package["version"]): package
+            for package in DeclarativeEnvironmentManager._locked_packages(data)
+        }
+        planned = saved.get("package", [])
+        planned_keys = [
+            (normalized_name(package.get("name", "")), package.get("version", ""))
+            for package in planned
+        ]
+        if len(planned_keys) != len(set(planned_keys)) or set(planned_keys) != set(locked):
+            raise PloadError("acquisition plan packages do not match the current lock")
+        artifact_methods = {
+            "cache", "configuration-artifact", "external-cache",
+            "repository", "index-exact",
+        }
+        allowed_methods = artifact_methods | {
+            "environment-copy", "index-resolve", "unavailable",
+        }
+        for package, key in zip(planned, planned_keys):
+            method = package.get("method")
+            if method not in allowed_methods:
+                raise PloadError(f"unsupported method in acquisition plan: {method}")
+            artifact = package.get("artifact")
+            if method in artifact_methods:
+                allowed = {
+                    (item["filename"], item["sha256"])
+                    for item in locked[key].get("artifact", [])
+                }
+                identity = (
+                    artifact.get("filename"), artifact.get("sha256")
+                ) if isinstance(artifact, dict) else None
+                if identity not in allowed:
+                    raise PloadError(
+                        f"planned artifact is not present in the lock for "
+                        f"{package['name']}=={package['version']}"
+                    )
+            elif artifact:
+                raise PloadError(f"method {method} must not contain a wheel artifact")
+            if method == "environment-copy" and not package.get("fingerprint"):
+                raise PloadError("environment-copy route has no package fingerprint")
+            if (method == "index-resolve"
+                    and data["policy"].get("reproducibility") != "compatible"):
+                raise PloadError("index-resolve is forbidden by exact reproducibility policy")
+
+    def _copy_distribution(self, package, target_environment, stage):
+        selected = package["selected"]
+        source_environment = Path(selected["location"])
+        source_python = source_environment / (
+            "Scripts/python.exe" if os.name == "nt" else "bin/python"
+        )
+        archive = stage / (normalized_name(package["name"]) + ".zip")
+        script = r'''
+import hashlib, json, os, sys, sysconfig, zipfile
+from importlib import metadata
+name, version, fingerprint, output = sys.argv[1:]
+dist = metadata.distribution(name)
+record = dist.read_text('RECORD') or ''
+if dist.version != version or hashlib.sha256(record.encode()).hexdigest() != fingerprint:
+    raise SystemExit('source distribution changed after planning')
+roots = [os.path.realpath(sysconfig.get_path(key)) for key in ('purelib', 'platlib')
+         if sysconfig.get_path(key)]
+files = []
+for item in dist.files or []:
+    source = os.path.realpath(str(dist.locate_file(item)))
+    match = next((root for root in roots
+                  if source == root or source.startswith(root + os.sep)), None)
+    if not match:
+        raise SystemExit('distribution contains files outside site-packages')
+    relative = os.path.relpath(source, match)
+    if relative.startswith('..' + os.sep) or os.path.isabs(relative):
+        raise SystemExit('unsafe distribution path')
+    if os.path.isfile(source):
+        files.append((source, relative))
+with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as bundle:
+    for source, relative in files:
+        bundle.write(source, relative)
+'''
+        execute([
+            str(source_python), "-c", script, package["name"], package["version"],
+            selected["fingerprint"], str(archive),
+        ])
+        target_python = Path(target_environment) / (
+            "Scripts/python.exe" if os.name == "nt" else "bin/python"
+        )
+        site_packages = Path(execute([
+            str(target_python), "-c",
+            "import sysconfig; print(sysconfig.get_path('purelib'))",
+        ]))
+        with zipfile.ZipFile(archive) as bundle:
+            for member in bundle.infolist():
+                destination = (site_packages / member.filename).resolve()
+                if site_packages.resolve() not in destination.parents:
+                    raise PloadError("environment package contains an unsafe path")
+            bundle.extractall(site_packages)
+
     def _acquire(self, path, data, package, selected, destination, stage):
         artifact = selected["artifact"]
         if selected["method"] == "configuration-artifact":
             shutil.copyfile(selected["location"], destination)
+        elif selected["method"] == "external-cache":
+            source = Path(selected["location"])
+            if not source.is_file() or digest(source) != artifact["sha256"]:
+                raise PloadError("selected external cache artifact changed or disappeared")
+            shutil.copyfile(source, destination)
         elif selected["method"] == "repository":
             ArtifactRepository.fetch(
                 data["repositories"][selected["location"]], artifact["sha256"],

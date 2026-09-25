@@ -21,6 +21,7 @@ from pload.declarative import (
 from pload.errors import PloadError
 from pload.managers.platform import ConfigManager
 from pload.managers.venv import VenvManager
+from pload.resource_plan import file_digest, write_plan
 from pload.settings import save_settings
 from pload.snapshots import digest, execute
 
@@ -264,6 +265,99 @@ def test_cache_plan_applies_without_package_network_access(tmp_path, monkeypatch
     assert output == "42"
 
 
+def test_plan_discovers_and_apply_uses_exact_external_cache(tmp_path, monkeypatch):
+    external_cache = tmp_path / "pip-cache"
+    wheel = tiny_wheel(external_cache)
+    config_home = tmp_path / "home"
+    save_settings(config_home, {"resource_cache_dirs": [str(external_cache)]})
+    config = ConfigManager(home=config_home)
+    config.get_python_path = lambda version=None: Path(sys.executable)
+    data = simple_manifest("exact")
+    data["name"] = "external-cache"
+    data["environment"].update({
+        "python": platform.python_version(),
+        "implementation": sys.implementation.name,
+        "system": platform.system(),
+        "machine": platform.machine(),
+        "dependencies": ["pload-demo==1.0"],
+    })
+    data["package"] = [{
+        "name": "pload-demo", "version": "1.0", "sources": ["default"],
+        "artifact": [{
+            "filename": wheel.name, "sha256": digest(wheel),
+            "tags": ["py3-none-any"], "repositories": [],
+        }],
+    }]
+    manifest = tmp_path / "project" / "pload.toml"
+    manifest.parent.mkdir()
+    write_configuration(manifest, data)
+    manager = DeclarativeEnvironmentManager(config)
+
+    selected = manager.plan(manifest)["packages"][0]["selected"]
+    assert selected["method"] == "external-cache"
+    assert selected["location"] == str(wheel.resolve())
+
+    original_execute = declarative_module.execute
+
+    def reject_download(command, *args, **kwargs):
+        if "download" in command:
+            pytest.fail("external-cache route attempted a download")
+        return original_execute(command, *args, **kwargs)
+
+    monkeypatch.setattr(declarative_module, "execute", reject_download)
+    restored = manager.apply(manifest)
+    assert digest(manager.cache / wheel.name) == digest(wheel)
+    assert original_execute([
+        config.get_pip_command(restored)[0], "-c",
+        "import pload_demo; print(pload_demo.answer)",
+    ]) == "42"
+
+
+def test_plan_reuses_package_from_compatible_pload_environment(tmp_path, monkeypatch):
+    config = ConfigManager(home=tmp_path / "home")
+    config.get_python_path = lambda version=None: Path(sys.executable)
+    wheel = tiny_wheel(tmp_path / "fixture")
+    source = VenvManager(config).create_venv(name="package-source")
+    original_execute = declarative_module.execute
+    original_execute(config.get_pip_command(source) + [
+        "install", "--no-index", "--find-links", str(wheel.parent), "pload-demo==1.0",
+    ])
+    data = simple_manifest("exact")
+    data["name"] = "environment-copy"
+    data["environment"].update({
+        "python": platform.python_version(),
+        "implementation": sys.implementation.name,
+        "system": platform.system(),
+        "machine": platform.machine(),
+        "dependencies": ["pload-demo==1.0"],
+    })
+    data["package"] = [{
+        "name": "pload-demo", "version": "1.0", "sources": ["default"],
+        "artifact": [],
+    }]
+    manifest = tmp_path / "project" / "pload.toml"
+    manifest.parent.mkdir()
+    write_configuration(manifest, data)
+    manager = DeclarativeEnvironmentManager(config)
+
+    selected = manager.plan(manifest)["packages"][0]["selected"]
+    assert selected["method"] == "environment-copy"
+    assert selected["location"] == str(source)
+    assert len(selected["fingerprint"]) == 64
+
+    def reject_package_network(command, *args, **kwargs):
+        if "download" in command or ("install" in command and "--no-index" not in command):
+            pytest.fail("environment-copy route attempted package network access")
+        return original_execute(command, *args, **kwargs)
+
+    monkeypatch.setattr(declarative_module, "execute", reject_package_network)
+    restored = manager.apply(manifest)
+    assert original_execute([
+        config.get_pip_command(restored)[0], "-c",
+        "import pload_demo; print(pload_demo.answer)",
+    ]) == "42"
+
+
 def test_lock_resolves_once_and_plan_remains_read_only(tmp_path, monkeypatch):
     config = ConfigManager(home=tmp_path / "home")
     config.get_python_path = lambda version=None: Path(sys.executable)
@@ -371,7 +465,7 @@ def test_plan_relocks_when_new_dependency_makes_existing_lock_stale(tmp_path, mo
     assert calls == []
     assert manifest.read_bytes() == before_manifest
     assert lock_path(manifest).read_bytes() == before_lock
-    with pytest.raises(PloadError, match="pload lock"):
+    with pytest.raises(PloadError, match="missing or stale"):
         manager.apply(manifest)
 
     progress = []
@@ -468,7 +562,7 @@ def test_apply_rolls_back_a_new_environment_after_install_failure(tmp_path):
         VenvManager(config).resolve_existing("demo")
 
 
-def test_apply_publishes_acquired_artifacts_to_policy_repository(tmp_path):
+def test_apply_requires_a_saved_plan_and_never_auto_publishes(tmp_path):
     config = ConfigManager(home=tmp_path / "home")
     config.get_python_path = lambda version=None: Path(sys.executable)
     wheel = tiny_wheel(tmp_path / "artifacts")
@@ -496,8 +590,76 @@ def test_apply_publishes_acquired_artifacts_to_policy_repository(tmp_path):
     }]
     manifest = tmp_path / "pload.toml"
     write_configuration(manifest, data)
-    DeclarativeEnvironmentManager(config).apply(manifest)
-    assert (repository / "objects" / checksum).is_file()
+    manager = DeclarativeEnvironmentManager(config)
+    with pytest.raises(PloadError, match="plan is missing"):
+        manager.apply(manifest)
+    manager.plan(manifest)
+    manager.apply(manifest)
+    assert not (repository / "objects" / checksum).exists()
+
+
+def test_apply_obeys_selected_route_without_fallback(tmp_path, monkeypatch):
+    config = ConfigManager(home=tmp_path / "home")
+    config.get_python_path = lambda version=None: Path(sys.executable)
+    wheel = tiny_wheel(tmp_path / "artifacts")
+    data = simple_manifest("exact")
+    data["name"] = "strict-route"
+    data["environment"].update({
+        "python": platform.python_version(),
+        "implementation": sys.implementation.name,
+        "system": platform.system(),
+        "machine": platform.machine(),
+        "dependencies": ["pload-demo==1.0"],
+    })
+    data["package"] = [{
+        "name": "pload-demo", "version": "1.0", "sources": ["default"],
+        "artifact": [{
+            "filename": wheel.name, "sha256": digest(wheel),
+            "tags": ["py3-none-any"], "repositories": [],
+        }],
+    }]
+    manifest = tmp_path / "pload.toml"
+    write_configuration(manifest, data)
+    manager = DeclarativeEnvironmentManager(config)
+    manager.cache.mkdir(parents=True)
+    shutil.copyfile(wheel, manager.cache / wheel.name)
+    manager.plan(manifest)
+    (manager.cache / wheel.name).unlink()
+
+    calls = []
+
+    def fail_selected(*args):
+        calls.append(args[3]["method"])
+        raise PloadError("selected cache vanished")
+
+    monkeypatch.setattr(manager, "_acquire", fail_selected)
+    with pytest.raises(PloadError, match="planned route failed.*cache"):
+        manager.apply(manifest)
+    assert calls == ["cache"]
+
+
+def test_apply_rejects_plan_that_omits_a_locked_package(tmp_path):
+    config = ConfigManager(home=tmp_path / "home")
+    config.get_python_path = lambda version=None: Path(sys.executable)
+    data = simple_manifest("exact")
+    data["environment"].update({
+        "python": platform.python_version(),
+        "implementation": sys.implementation.name,
+        "system": platform.system(),
+        "machine": platform.machine(),
+    })
+    manifest = tmp_path / "pload.toml"
+    write_configuration(manifest, data)
+    manager = DeclarativeEnvironmentManager(config)
+    generated = manager.plan(manifest)
+    generated["packages"] = []
+    generated["ready"] = True
+    write_plan(
+        manifest, declarative_module.configuration_digest(data),
+        file_digest(lock_path(manifest)), generated,
+    )
+    with pytest.raises(PloadError, match="do not match the current lock"):
+        manager.apply(manifest)
 
 
 def test_declarative_commands_and_shell_integration(capsys):

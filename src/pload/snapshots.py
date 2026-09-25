@@ -21,14 +21,24 @@ from pload.managers.venv import VenvManager
 from pload.settings import save_settings
 
 PROBE = """
-import json, platform, sys, os, shutil, subprocess
+import hashlib, json, platform, sys, os, shutil, subprocess, sysconfig
 from importlib import metadata
 packages = []
+library_roots = [os.path.realpath(sysconfig.get_path(key))
+                 for key in ('purelib', 'platlib') if sysconfig.get_path(key)]
 for dist in metadata.distributions():
     name = dist.metadata.get('Name')
     if name and name.lower() not in ('pip', 'setuptools', 'wheel'):
+        record = dist.read_text('RECORD') or ''
+        locations = [os.path.realpath(str(dist.locate_file(item)))
+                     for item in (dist.files or [])]
+        copyable = bool(locations) and all(any(
+            location == root or location.startswith(root + os.sep)
+            for root in library_roots) for location in locations)
         packages.append({'name': name, 'version': dist.version,
-                         'direct_url': dist.read_text('direct_url.json')})
+                         'direct_url': dist.read_text('direct_url.json'),
+                         'record_sha256': hashlib.sha256(record.encode()).hexdigest(),
+                         'copyable': copyable})
 accelerators = []
 nvidia_smi = shutil.which('nvidia-smi')
 if nvidia_smi:

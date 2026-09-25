@@ -1,5 +1,54 @@
 # Changelog
 
+## Unreleased
+
+Pre-release: `1.1.0a10`
+
+### Added
+
+- Keep user intent in a clean portable `pload.toml` and store pload-managed
+  exact dependency, artifact and hash decisions in sibling `.pload_lock.toml`.
+- Add `pload describe`, explicit `pload lock`, read-only `pload plan` and
+  idempotent `pload apply`; downloading cannot be triggered by planning.
+- Inventory the local wheel cache, adjacent artifacts, local/SSH content stores,
+  configured indexes and Python installations before choosing a route.
+- Allow package-specific indexes in `describe`, including CUDA wheel indexes,
+  while keeping credentials out of the portable configuration.
+- Reuse exact wheel archives by SHA-256, deduplicate local/SSH storage, record
+  detected NVIDIA driver provenance and roll back failed materializations.
+- Add complete field-by-field configuration and lock references, enforce agreement between
+  desired dependency pins and package locks, and make policy repositories and
+  `publish_missing_artifacts` drive lookup and automatic cache publication.
+- Validate locked wheel Python, ABI and platform tags against the requested
+  runtime during planning; incompatible cache entries can no longer be reported
+  as ready, and compatible mode explicitly plans network re-resolution instead.
+- Accept unpinned dependency intentions such as `numpy` and `pandas>=2`; the
+  explicit lock command resolves the complete wheel dependency closure, records
+  exact versions, hashes and tags, and subsequent plans inspect it read-only.
+- Treat edits that add or change dependencies beside an existing lock as a stale
+  lock to reconcile, not an invalid configuration; re-resolution
+  uses the complete requested set and prefers existing pload cache wheels.
+- Migrate lock tables embedded by earlier 1.1 previews into `.pload_lock.toml`
+  without another dependency resolution or artifact download.
+- Show animated status for explicit locking and artifact-repository inspection
+  instead of appearing frozen while pip or SSH work is captured in the background.
+- Refuse `apply` when the lock is absent or stale instead of resolving and
+  downloading implicitly.
+
+### Removed
+
+- Drop the unreleased transport-oriented `export`, `restore`, and repository
+  push/pull interface in favor of the declarative configuration workflow.
+
+### Fixed
+
+- Keep an external environment's interpreter path intact when probing packages,
+  instead of following its Python symlink out to the base installation.
+- Batch SSH repository inventory, publication and retrieval so environments with
+  several packages do not spend most of their time reconnecting. Show package
+  and transfer progress, enforce bounded SSH/SFTP operations, and report actual
+  transfer timeouts instead of appearing frozen.
+
 ## 1.0.0 - 2026-09-24
 
 ### Added

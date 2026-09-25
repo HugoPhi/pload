@@ -13,6 +13,7 @@ complete parameter reference and `-h -d` for practical examples and effects.
 ## Contents
 
 - [Install](#install)
+- [Reproduce and share environments](#reproduce-and-share-environments)
 - [Upgrade](#upgrade)
 - [First run](#first-run)
 - [Configure later](#configure-later)
@@ -23,6 +24,7 @@ complete parameter reference and `-h -d` for practical examples and effects.
 - [Isolation and directory layout](#isolation-and-directory-layout)
 - [Command reference](#command-reference)
 - [Development](#development)
+- [License](#license)
 
 ## Install
 
@@ -74,6 +76,30 @@ python -m pload.installer --yes \
 `--yes` accepts explicit values and saved defaults. It only changes a shell
 profile when `--shell` is supplied or already configured.
 
+## Reproduce and share environments
+
+The `1.1` pre-release uses a clean, user-authored `pload.toml` as the portable
+source of truth and writes exact resolver output to the sibling
+`.pload_lock.toml`. The user declares the desired environment; pload inventories local caches,
+configured local/SSH content stores, package indexes and Python installations,
+then performs transfers and installation internally:
+
+```console
+pload describe v2 -o pload.toml
+pload lock pload.toml
+pload plan pload.toml
+pload apply pload.toml
+```
+
+`plan` is strictly read-only: it never invokes pip, downloads packages, or
+changes either TOML file. Run `lock` explicitly after editing dependencies;
+`apply` refuses a missing or stale lock instead of resolving behind your back.
+
+See the [declarative environment guide](docs/declarative-environments.md) for the
+[complete TOML field reference](docs/declarative-environments.md#complete-ploadtoml-field-reference),
+exact versus compatible policies, resource-selection algorithm, CUDA wheel
+caching, idempotency and current platform boundaries.
+
 ## Upgrade
 
 Check the installed version first:
@@ -88,6 +114,12 @@ and virtual environments are kept:
 
 ```console
 pload-install --yes --package-spec "pload==1.0.0"
+```
+
+To opt into the declarative-environment pre-release for testing:
+
+```console
+pload-install --yes --package-spec "pload==1.1.0a10"
 ```
 
 To always follow the newest published release instead of pinning a version,

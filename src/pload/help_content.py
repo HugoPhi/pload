@@ -50,6 +50,20 @@ does not replace the operating system Python.
 - project-local `pload init` environments may live outside the managed root.
 
 Use `pload cfg` to see the exact effective paths before creating anything.
+
+## Reproduce an environment from one file
+
+```console
+$ pload describe v1 -o pload.toml
+$ pload lock pload.toml
+$ pload plan pload.toml
+$ pload apply pload.toml
+```
+
+`pload.toml` describes user intent and `.pload_lock.toml` records exact package
+artifacts. `plan` is strictly read-only. `lock` is the explicit operation that
+resolves dependencies and may download artifacts; `apply` only accepts a current
+lock and materializes its selected routes.
 """,
     ("new",): r"""
 # Create a managed environment
@@ -329,6 +343,95 @@ mirror, package-index, and shell choice, and updates only configuration and the
 selected shell profile. It does not reinstall pload or uv.
 """,
 }
+
+
+GUIDES[("describe",)] = r"""
+# Turn an existing environment into one portable configuration
+
+```console
+pload describe v2
+pload describe /project/.venv -o project.pload.toml
+pload describe /project/.venv/bin/python -n project -r lab
+pload describe v2 -s torch=https://download.pytorch.org/whl/cu121
+```
+
+The default exact mode locks every installed application package to an actual
+wheel and SHA-256. pload reuses its local cache, downloads a missing wheel when
+necessary, and publishes it to the selected configured local/SSH repository.
+These are internal resource operations: the user receives one TOML file.
+
+Use `--mode compatible` only when exact wheels do not exist and future
+re-resolution is acceptable. Native Conda packages are not silently converted.
+Credentials and URL query tokens are never written into the portable file.
+Use repeatable `--source PACKAGE=URL` options when an installed package came from
+a dedicated index that cannot be inferred reliably from installed metadata.
+"""
+GUIDES[("plan",)] = r"""
+# Explain how the desired state can be satisfied
+
+```console
+pload plan
+pload plan project.pload.toml
+pload plan --offline
+pload plan --json
+```
+
+Planning reads the configuration, discovers Python interpreters and checks local
+caches, adjacent artifacts and content-addressed repositories.
+Incompatible resources are rejected first; valid routes are ordered by exactness,
+compatibility risk, transfer, execution cost and a deterministic tie-breaker.
+It never invokes pip, downloads packages, writes a lock or changes either TOML
+file. A missing or stale lock is reported as `lock-required / pending`; run
+`pload lock` explicitly before planning exact resource routes.
+"""
+GUIDES[("lock",)] = r"""
+# Resolve the user declaration into an exact managed lock
+
+```console
+pload lock
+pload lock project.pload.toml
+pload lock --offline
+```
+
+Locking is an explicit mutating operation. It resolves direct and transitive
+dependencies for the configured Python, obtains exact wheels when necessary,
+computes SHA-256 identities and atomically writes `.pload_lock.toml` beside the
+configuration. `pload.toml` is never rewritten. Run it after changing Python,
+dependencies, sources or another resolution input.
+"""
+GUIDES[("apply",)] = r"""
+# Materialize the configuration
+
+```console
+pload apply
+pload apply project.pload.toml -n project-copy
+pload apply --offline
+```
+
+Apply requires a current `.pload_lock.toml`, then installs Python when needed,
+obtains exact artifacts through the selected
+resource routes, verifies hashes, creates the environment, installs packages and
+runs `pip check`. It never silently resolves or updates a stale lock. Reapplying
+the same configuration is idempotent; an
+existing environment with different state is never silently overwritten.
+"""
+GUIDES[("repo",)] = r"""
+# Configure reusable artifact providers
+
+```console
+pload repo add lab frpxiaoxin:/home/tibless/pload-cloud -t ssh
+pload repo add disk /mnt/shared/pload -t local
+pload repo list
+pload repo remove lab
+```
+
+`describe` embeds configured local/SSH providers in `pload.toml`; `apply` uses them
+automatically. SSH relies on OpenSSH aliases, keys and agents and stores no password.
+Objects are addressed by SHA-256 so identical large wheels are stored only once.
+Removing a provider forgets its configuration but does not delete remote data.
+"""
+for _command in ("add", "list", "remove"):
+    GUIDES[("repo", _command)] = GUIDES[("repo",)]
 
 
 def render_detailed_help(parser, command_path):

@@ -3,6 +3,13 @@
 Changes are developed on a release branch and merged to `main` only after the
 release checklist passes. Each stable merge receives a matching annotated tag.
 
+## Pre-release testing
+
+Every candidate uses a PEP 440 pre-release version. After the cross-platform
+matrix passes, install its wheel into the maintainer's private macOS pload runtime
+without changing `PLOAD_HOME`, environment state or caches. Promotion to a stable
+version requires explicit acceptance after that Mac test.
+
 ## 0.4.x: portable foundation
 
 - Centralize filesystem and interpreter resolution.

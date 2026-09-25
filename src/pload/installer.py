@@ -367,10 +367,11 @@ def collect_settings(args):
         pip_index = ask("custom Python package index URL", "https://example.com/simple", False)
 
     return {
+        **existing,
         "home": str(home),
         "bin_dir": str(bin_dir),
         "venvs_dir": str(venvs_dir),
-        "state_dir": str(home / "state"),
+        "state_dir": existing.get("state_dir", str(home / "state")),
         "pip_source": pip_source,
         "pip_index": pip_index,
         "package_spec": args.package_spec or existing.get("package_spec") or default_package_spec(),

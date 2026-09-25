@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pload"
-version = "1.0.0"
+version = "1.1.0a10"
 description = "A small, relocatable Python virtual environment manager"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -12,7 +12,7 @@ license = { file = "LICENSE" }
 authors = [{ name = "Yunming Hu", email = "hugonelsonm3@gmail.com" }]
 keywords = ["python", "venv", "virtual-environment", "pyenv"]
 classifiers = [
-  "Development Status :: 5 - Production/Stable",
+  "Development Status :: 3 - Alpha",
   "Environment :: Console",
   "Operating System :: MacOS",
   "Operating System :: Microsoft :: Windows",
@@ -20,7 +20,11 @@ classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
 ]
-dependencies = ["rich>=13.7,<15"]
+dependencies = [
+  "packaging>=23.2,<26",
+  "rich>=13.7,<15",
+  "tomli>=2; python_version < '3.11'",
+]
 
 [project.scripts]
 pload = "pload.cli:main"

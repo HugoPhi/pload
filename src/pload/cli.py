@@ -28,6 +28,11 @@ COMMAND_ALIASES = {
     "shell-init": ("shell",),
     "python": ("py",),
     "config": ("cfg",),
+    "describe": (),
+    "lock": (),
+    "plan": (),
+    "apply": (),
+    "repo": (),
 }
 PYTHON_ALIASES = {
     "install": (),
@@ -276,6 +281,60 @@ Aliases: system=sys, managed=uv""",
     )
     config.add_argument("key", nargs="?", help="setting name for `config set`")
     config.add_argument("value", nargs="?", help="new value for `config set`")
+    describe = subparsers.add_parser(
+        "describe", description="Describe an existing environment as one portable configuration.",
+        help="create pload.toml from an existing environment",
+    )
+    describe.add_argument("source", help="environment ID, name, path, or Python executable")
+    describe.add_argument("--output", "-o", default="pload.toml",
+                          help="configuration file to write (default: pload.toml)")
+    describe.add_argument("--name", "-n", help="logical environment name")
+    describe.add_argument("--mode", "-m", choices=["exact", "compatible"], default="exact",
+                          help="lock exact artifacts or permit re-resolution (default: exact)")
+    describe.add_argument("--repository", "-r",
+                          help="artifact repository; defaults to the first configured local/SSH repo")
+    describe.add_argument(
+        "--source", "-s", dest="package_sources", action="append", default=[],
+        metavar="PACKAGE=URL",
+        help="package-specific index; repeat for packages such as CUDA-enabled torch",
+    )
+    lock = subparsers.add_parser(
+        "lock", description="Resolve dependencies and write the managed environment lock.",
+        help="resolve and write .pload_lock.toml",
+    )
+    lock.add_argument("file", nargs="?", default="pload.toml",
+                      help="environment configuration (default: pload.toml)")
+    lock.add_argument("--offline", "-o", action="store_true",
+                      help="use only already available resolver resources")
+    plan = subparsers.add_parser(
+        "plan", description="Compare a declarative environment with all available resources.",
+        help="explain how pload would satisfy a configuration",
+    )
+    plan.add_argument("file", nargs="?", default="pload.toml",
+                      help="environment configuration (default: pload.toml)")
+    plan.add_argument("--offline", "-o", action="store_true",
+                      help="plan using only resources available without the internet")
+    plan.add_argument("--json", "-j", action="store_true", help="emit machine-readable JSON")
+    apply = subparsers.add_parser(
+        "apply", description="Materialize the desired environment from available resources.",
+        help="create or verify an environment from pload.toml",
+    )
+    apply.add_argument("file", nargs="?", default="pload.toml",
+                       help="environment configuration (default: pload.toml)")
+    apply.add_argument("--name", "-n", help="override the materialized environment name")
+    apply.add_argument("--offline", "-o", action="store_true",
+                       help="forbid internet access; configured local/SSH repositories remain usable")
+    repo = subparsers.add_parser("repo", help="manage resource providers",
+                                 description="Manage local and SSH artifact providers.")
+    actions = repo.add_subparsers(dest="repo_command", required=True)
+    add = actions.add_parser("add", description="Save a repository location; no credentials stored.")
+    add.add_argument("name", help="repository nickname")
+    add.add_argument("location", help="directory or HOST:/absolute/path")
+    add.add_argument("--type", "-t", choices=["local", "ssh"], default="local",
+                     help="transport (default: local)")
+    actions.add_parser("list", aliases=["ls"], description="Show configured repositories.")
+    remove = actions.add_parser("remove", description="Remove configuration, keeping all remote files.")
+    remove.add_argument("name", help="repository nickname")
     return parser
 
 
@@ -393,6 +452,42 @@ def _global_options_table(root_parser):
     return table
 
 
+def print_declarative_plan(plan):
+    console = Console(highlight=False)
+    if plan["lock"]["required"]:
+        console.print(
+            f"[bold yellow]Lock: {plan['lock']['status']}[/] · plan is read-only; "
+            "run [bold green]pload lock[/] to resolve dependencies"
+        )
+    python = plan["python"]
+    console.print(Panel.fit(
+        f"[bold]{plan['name']}[/]\nPython: [cyan]{python['method']}[/] · "
+        f"{python['location']} · [bold]{python['status']}[/]",
+        title="[bold cyan]Environment plan[/]",
+        border_style="blue",
+    ))
+    table = Table(box=box.ROUNDED, header_style="bold cyan", border_style="blue")
+    table.add_column("PACKAGE", style="bold green", no_wrap=True)
+    table.add_column("VERSION", style="yellow", no_wrap=True)
+    table.add_column("METHOD", style="cyan", no_wrap=True)
+    table.add_column("STATUS", no_wrap=True)
+    table.add_column("RESOURCE")
+    for package in plan["packages"]:
+        selected = package["selected"]
+        if selected:
+            table.add_row(package["name"], package["version"], selected["method"],
+                          selected["status"], selected["location"])
+        else:
+            rejected = package.get("rejections", [])
+            if rejected:
+                table.add_row(package["name"], package["version"], "—", "incompatible",
+                              rejected[0]["artifact"])
+            else:
+                table.add_row(package["name"], package["version"], "—", "unavailable",
+                              "No resource satisfies the configuration")
+    console.print(table)
+
+
 def _print_spaced_section(console, renderable):
     """Give a standalone section consistent visual breathing room."""
     console.print()
@@ -463,10 +558,15 @@ def _brief_help(parser, command_path, root_parser=None):
             "path": "Print an environment path",
             "config": "Show effective configuration",
             "shell-init": "Print shell activation integration",
+            "describe": "Write one portable configuration for an existing environment",
+            "lock": "Resolve dependencies into .pload_lock.toml",
+            "plan": "Compare a configuration with available resources",
+            "apply": "Materialize the environment declared by pload.toml",
+            "repo": "Manage local and SSH artifact providers",
         }
-        for command in ("new", "init", "list", "rm", "python", "path", "config", "shell-init"):
+        for command, summary in summaries.items():
             aliases = COMMAND_ALIASES[command]
-            table.add_row(command, ", ".join(aliases) if aliases else "—", summaries[command])
+            table.add_row(command, ", ".join(aliases) if aliases else "—", summary)
         console.print(table)
         console.print("[bold cyan]Quick start[/]")
         console.print("  [green]pload new[/]  [dim]# guided creation[/]")
@@ -541,6 +641,10 @@ def render_landing():
     table.add_column("WHAT IT DOES")
     table.add_row("pload cfg", "Show where pload stores its data")
     table.add_row("pload python list", "Find every usable Python interpreter")
+    table.add_row("pload describe v1", "Describe an environment in pload.toml")
+    table.add_row("pload lock", "Resolve and record exact package artifacts")
+    table.add_row("pload plan", "Preview without downloading or changing files")
+    table.add_row("pload apply", "Create exactly what pload.toml declares")
     table.add_row("pload new", "Open guided environment creation")
     table.add_row("pload new -n data -v 3.12", "Create a named virtual environment")
     table.add_row("pload list", "List environments, IDs, and descriptions")
@@ -554,7 +658,7 @@ def shell_script(shell):
     if shell in {"bash", "zsh"}:
         return r'''pload() {
     case "${1:-}" in
-        ""|new|init|i|rm|remove|del|delete|list|ls|path|p|shell-init|shell|python|py|config|cfg|-*)
+        ""|new|init|i|rm|remove|del|delete|list|ls|path|p|shell-init|shell|python|py|config|cfg|describe|lock|plan|apply|repo|-*)
             command pload "$@"
             ;;
         *)
@@ -567,7 +671,7 @@ def shell_script(shell):
     if shell == "fish":
         return r'''function pload
     switch "$argv[1]"
-        case '' new init i rm remove del delete list ls path p shell-init shell python py config cfg '-*'
+        case '' new init i rm remove del delete list ls path p shell-init shell python py config cfg describe lock plan apply repo '-*'
             command pload $argv
         case '*'
             set -l name .
@@ -581,7 +685,7 @@ def shell_script(shell):
 end'''
     return r'''function pload {
     param([Parameter(ValueFromRemainingArguments = $true)][string[]]$PloadArgs)
-    $commands = @('new', 'init', 'i', 'rm', 'remove', 'del', 'delete', 'list', 'ls', 'path', 'p', 'shell-init', 'shell', 'python', 'py', 'config', 'cfg', '-h', '--help', '--version')
+    $commands = @('new', 'init', 'i', 'rm', 'remove', 'del', 'delete', 'list', 'ls', 'path', 'p', 'shell-init', 'shell', 'python', 'py', 'config', 'cfg', 'describe', 'lock', 'plan', 'apply', 'repo', '-h', '--help', '--version')
     $backend = Get-Command -Name @('pload.exe', 'pload.cmd') -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $backend) { throw 'pload executable not found on PATH' }
     if ($PloadArgs.Count -eq 0) {
@@ -646,6 +750,72 @@ def run(argv=None):
     config = ConfigManager(args.home, args.venvs_dir, args.state_dir)
     venvs = VenvManager(config)
     dependencies = DependencyManager(config)
+
+    if command in {"describe", "lock", "plan", "apply", "repo"}:
+        if command == "repo":
+            from pload.snapshots import RepositoryManager
+
+            repositories = RepositoryManager(config)
+            if args.repo_command == "add":
+                repositories.add(args.name, args.location, args.type)
+            elif args.repo_command == "remove":
+                repositories.remove(args.name)
+            else:
+                print(json.dumps(repositories.repositories(), indent=2))
+            return 0
+        from pload.declarative import DeclarativeEnvironmentManager
+
+        manager = DeclarativeEnvironmentManager(config)
+        if command == "describe":
+            progress_console = Console(highlight=False)
+            print(manager.describe(
+                args.source, args.output, args.name, args.mode, args.repository,
+                args.package_sources,
+                progress=lambda message: progress_console.print(
+                    Text("• " + message, style="cyan")
+                ),
+            ))
+        elif command == "lock":
+            progress_console = Console(highlight=False, stderr=True)
+            with progress_console.status(
+                "[cyan]Reading configuration…[/]", spinner="dots",
+            ) as status:
+                result = manager.lock(
+                    args.file, args.offline,
+                    progress=lambda message: status.update(f"[cyan]{message}…[/]"),
+                )
+            count = len(result["resolved"])
+            action = "Wrote" if result["updated"] else "Reused"
+            Console(highlight=False).print(
+                f"[bold green]✓ {action} {count} locked packages[/] in "
+                f"[cyan]{result['path']}[/]"
+            )
+        elif command == "plan":
+            if args.json:
+                plan = manager.plan(args.file, args.offline)
+                print(json.dumps(plan, ensure_ascii=False, indent=2))
+            else:
+                progress_console = Console(highlight=False, stderr=True)
+                with progress_console.status(
+                    "[cyan]Reading configuration and available resources…[/]",
+                    spinner="dots",
+                ) as status:
+                    plan = manager.plan(
+                        args.file, args.offline,
+                        progress=lambda message: status.update(
+                            f"[cyan]{message}…[/]"
+                        ),
+                    )
+                print_declarative_plan(plan)
+        else:
+            progress_console = Console(highlight=False)
+            print(manager.apply(
+                args.file, args.name, args.offline,
+                progress=lambda message: progress_console.print(
+                    Text("• " + message, style="cyan")
+                ),
+            ))
+        return 0
 
     if command == "new":
         if not any((args.python_version, args.name, args.path, args.description, args.requirements, args.channel)):
@@ -759,7 +929,7 @@ def run(argv=None):
 def main(argv=None):
     try:
         return run(argv)
-    except (PloadError, PythonNotFoundError, re.error) as exc:
+    except (PloadError, PythonNotFoundError, re.error, OSError) as exc:
         print(f"pload: error: {exc}", file=sys.stderr)
         return 1
 

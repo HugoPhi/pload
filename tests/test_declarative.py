@@ -11,8 +11,11 @@ import pload.declarative as declarative_module
 from pload.cli import build_parser, main, shell_script
 from pload.declarative import (
     DeclarativeEnvironmentManager,
+    dump_lock,
     dump_manifest,
+    load_lock,
     load_manifest,
+    lock_path,
     validate_manifest,
 )
 from pload.errors import PloadError
@@ -64,13 +67,52 @@ def simple_manifest(mode="compatible"):
     }
 
 
+def write_configuration(path, data, with_lock=True):
+    path.write_text(dump_manifest(data), encoding="utf-8")
+    if with_lock and data.get("package"):
+        locked = dict(data)
+        locked["resolved_dependencies"] = [
+            f"{item['name']}=={item['version']}" for item in data["package"]
+        ]
+        lock_path(path).write_text(dump_lock(path, locked), encoding="utf-8")
+
+
 def test_manifest_roundtrip(tmp_path):
     data = simple_manifest()
     path = tmp_path / "pload.toml"
-    path.write_text(dump_manifest(data), encoding="utf-8")
+    write_configuration(path, data)
     loaded_path, loaded = load_manifest(path)
     assert loaded_path == path
-    assert loaded == data
+    assert loaded["environment"] == data["environment"]
+    assert loaded["package"] == []
+    _, locked, current = load_lock(path, loaded)
+    assert current is True
+    assert locked["package"] == data["package"]
+
+
+def test_plan_migrates_legacy_embedded_lock_without_resolving(tmp_path, monkeypatch):
+    data = simple_manifest("exact")
+    path = tmp_path / "pload.toml"
+    legacy = dump_manifest(data) + """
+[[package]]
+name = "demo"
+version = "1.0"
+sources = ["default"]
+"""
+    path.write_text(legacy, encoding="utf-8")
+    monkeypatch.setattr(
+        declarative_module, "execute",
+        lambda *args, **kwargs: pytest.fail("legacy migration invoked the resolver"),
+    )
+
+    plan = DeclarativeEnvironmentManager(ConfigManager(home=tmp_path / "home")).plan(path)
+
+    assert plan["lock"]["migrated"] is True
+    assert "[[package]]" not in path.read_text(encoding="utf-8")
+    _, configuration = load_manifest(path)
+    _, locked, current = load_lock(path, configuration)
+    assert current is True
+    assert locked["package"][0]["name"] == "demo"
 
 
 def test_manifest_accepts_unpinned_requirements_but_rejects_direct_urls():
@@ -111,7 +153,7 @@ def test_manifest_rejects_unknown_policy_repository():
 
 def test_compatible_plan_uses_index_and_offline_reports_missing(tmp_path):
     path = tmp_path / "pload.toml"
-    path.write_text(dump_manifest(simple_manifest()), encoding="utf-8")
+    write_configuration(path, simple_manifest())
     manager = DeclarativeEnvironmentManager(ConfigManager(home=tmp_path / "home"))
     assert manager.plan(path)["packages"][0]["selected"]["method"] == "index-resolve"
     assert manager.plan(path, offline=True)["packages"][0]["selected"] is None
@@ -120,7 +162,7 @@ def test_compatible_plan_uses_index_and_offline_reports_missing(tmp_path):
 def test_exact_configuration_requires_an_artifact_route(tmp_path):
     data = simple_manifest("exact")
     path = tmp_path / "pload.toml"
-    path.write_text(dump_manifest(data), encoding="utf-8")
+    write_configuration(path, data)
     manager = DeclarativeEnvironmentManager(ConfigManager(home=tmp_path / "home"))
     assert manager.plan(path)["ready"] is False
 
@@ -147,7 +189,7 @@ def test_changed_python_rejects_incompatible_cached_wheel_before_apply(tmp_path,
         }],
     }]
     manifest = tmp_path / "pload.toml"
-    manifest.write_text(dump_manifest(data), encoding="utf-8")
+    write_configuration(manifest, data)
     manager = DeclarativeEnvironmentManager(config)
     manager.cache.mkdir(parents=True)
     shutil.copyfile(wheel, manager.cache / wheel.name)
@@ -171,7 +213,7 @@ def test_changed_python_rejects_incompatible_cached_wheel_before_apply(tmp_path,
         manager.apply(manifest)
 
     data["policy"]["reproducibility"] = "compatible"
-    manifest.write_text(dump_manifest(data), encoding="utf-8")
+    write_configuration(manifest, data)
     compatible = manager.plan(manifest)["packages"][0]
     assert compatible["selected"]["method"] == "index-resolve"
     assert compatible["selected"]["status"] == "network"
@@ -199,7 +241,7 @@ def test_cache_plan_applies_without_package_network_access(tmp_path, monkeypatch
         }],
     }]
     manifest = tmp_path / "pload.toml"
-    manifest.write_text(dump_manifest(data), encoding="utf-8")
+    write_configuration(manifest, data)
     manager = DeclarativeEnvironmentManager(config)
     manager.cache.mkdir(parents=True)
     shutil.copyfile(wheel, manager.cache / wheel.name)
@@ -238,7 +280,7 @@ def test_plan_locks_unpinned_dependencies_once_then_applies_from_cache(tmp_path,
     data["policy"]["publish_missing_artifacts"] = False
     data["package"] = []
     manifest = tmp_path / "pload.toml"
-    manifest.write_text(dump_manifest(data), encoding="utf-8")
+    write_configuration(manifest, data, with_lock=False)
     manager = DeclarativeEnvironmentManager(config)
     original_execute = declarative_module.execute
     download_calls = []
@@ -259,7 +301,10 @@ def test_plan_locks_unpinned_dependencies_once_then_applies_from_cache(tmp_path,
     assert first["lock"]["requested"] == ["pload-demo>=1"]
     assert first["lock"]["resolved"] == ["pload-demo==1.0"]
     assert first["packages"][0]["selected"]["method"] == "cache"
-    _, locked = load_manifest(manifest)
+    _, configuration = load_manifest(manifest)
+    assert configuration["environment"]["dependencies"] == ["pload-demo>=1"]
+    _, locked, current = load_lock(manifest, configuration)
+    assert current is True
     assert locked["environment"]["dependencies"] == ["pload-demo==1.0"]
     assert locked["package"][0]["artifact"][0]["filename"] == wheel.name
 
@@ -285,10 +330,12 @@ def test_plan_relocks_when_new_dependency_makes_existing_lock_stale(tmp_path, mo
         "implementation": sys.implementation.name,
         "system": platform.system(),
         "machine": platform.machine(),
-        "dependencies": ["pload-demo==1.0", "extra-demo"],
+        "dependencies": ["pload-demo==1.0"],
     })
     manifest = tmp_path / "pload.toml"
-    manifest.write_text(dump_manifest(data), encoding="utf-8")
+    write_configuration(manifest, data)
+    data["environment"]["dependencies"].append("extra-demo")
+    write_configuration(manifest, data, with_lock=False)
     manager = DeclarativeEnvironmentManager(config)
     calls = []
 
@@ -309,7 +356,12 @@ def test_plan_relocks_when_new_dependency_makes_existing_lock_stale(tmp_path, mo
     assert len(calls) == 1
     assert plan["lock"]["requested"] == ["pload-demo==1.0", "extra-demo"]
     assert plan["lock"]["resolved"] == ["extra-demo==1.0", "pload-demo==1.0"]
-    _, locked = load_manifest(manifest)
+    _, configuration = load_manifest(manifest)
+    assert configuration["environment"]["dependencies"] == [
+        "pload-demo==1.0", "extra-demo",
+    ]
+    _, locked, current = load_lock(manifest, configuration)
+    assert current is True
     assert {item["name"] for item in locked["package"]} == {"extra-demo", "pload-demo"}
 
 
@@ -336,9 +388,11 @@ def test_describe_plan_apply_through_content_repository(tmp_path):
         progress=describe_progress.append,
     )
     _, data = load_manifest(manifest)
-    artifact = data["package"][0]["artifact"][0]
+    _, locked, current = load_lock(manifest, data)
+    assert current is True
+    artifact = locked["package"][0]["artifact"][0]
     assert data["sources"]["default"]["url"] == "https://example.invalid/simple"
-    assert data["package"][0]["sources"] == ["package-pload-demo"]
+    assert locked["package"][0]["sources"] == ["package-pload-demo"]
     assert data["sources"]["package-pload-demo"]["url"].endswith("/cu121")
     assert artifact["repositories"] == ["lab"]
     assert (repository / "objects" / artifact["sha256"]).is_file()
@@ -381,7 +435,7 @@ def test_apply_rolls_back_a_new_environment_after_install_failure(tmp_path):
         "tags": ["py3-none-any"], "repositories": [],
     }]
     manifest = tmp_path / "pload.toml"
-    manifest.write_text(dump_manifest(data), encoding="utf-8")
+    write_configuration(manifest, data)
     with pytest.raises(PloadError):
         DeclarativeEnvironmentManager(config).apply(manifest)
     with pytest.raises(PloadError):
@@ -415,7 +469,7 @@ def test_apply_publishes_acquired_artifacts_to_policy_repository(tmp_path):
         }],
     }]
     manifest = tmp_path / "pload.toml"
-    manifest.write_text(dump_manifest(data), encoding="utf-8")
+    write_configuration(manifest, data)
     DeclarativeEnvironmentManager(config).apply(manifest)
     assert (repository / "objects" / checksum).is_file()
 

@@ -78,8 +78,9 @@ profile when `--shell` is supplied or already configured.
 
 ## Reproduce and share environments
 
-The `1.1` pre-release uses one `pload.toml` as the portable source of truth.
-The user declares the desired environment; pload inventories local caches,
+The `1.1` pre-release uses a clean, user-authored `pload.toml` as the portable
+source of truth and writes exact resolver output to the sibling
+`.pload_lock.toml`. The user declares the desired environment; pload inventories local caches,
 configured local/SSH content stores, package indexes and Python installations,
 then performs transfers and installation internally:
 
@@ -113,7 +114,7 @@ pload-install --yes --package-spec "pload==1.0.0"
 To opt into the declarative-environment pre-release for testing:
 
 ```console
-pload-install --yes --package-spec "pload==1.1.0a7"
+pload-install --yes --package-spec "pload==1.1.0a8"
 ```
 
 To always follow the newest published release instead of pinning a version,

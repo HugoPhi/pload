@@ -447,9 +447,10 @@ def print_declarative_plan(plan):
     console = Console(highlight=False)
     if plan.get("lock"):
         count = len(plan["lock"]["resolved"])
+        action = "Migrated" if plan["lock"].get("migrated") else "Locked"
         console.print(
-            f"[bold green]✓ Locked {count} packages[/] and updated "
-            f"[cyan]{plan['path']}[/]"
+            f"[bold green]✓ {action} {count} packages[/] in "
+            f"[cyan]{plan['lock']['path']}[/]"
         )
     python = plan["python"]
     console.print(Panel.fit(

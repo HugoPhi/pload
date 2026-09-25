@@ -107,7 +107,7 @@ def _array(values):
 
 
 def dump_manifest(data):
-    """Serialize the deliberately small schema without a TOML writer dependency."""
+    """Serialize only the user-authored environment declaration."""
     environment = data["environment"]
     policy = data["policy"]
     lines = [
@@ -150,6 +150,28 @@ def dump_manifest(data):
             f"kind = {_quoted(repository['kind'])}",
             f"location = {_quoted(repository['location'])}",
         ]
+    return "\n".join(lines) + "\n"
+
+
+def lock_path(manifest_path):
+    """Return the pload-managed lock beside a user configuration."""
+    return Path(manifest_path).parent / ".pload_lock.toml"
+
+
+def configuration_digest(data):
+    return hashlib.sha256(dump_manifest(data).encode("utf-8")).hexdigest()
+
+
+def dump_lock(manifest_path, data):
+    """Serialize resolver output separately from the user configuration."""
+    lines = [
+        "schema = 1",
+        f"configuration = {_quoted(Path(manifest_path).name)}",
+        f"configuration_sha256 = {_quoted(configuration_digest(data))}",
+        "",
+        "[environment]",
+        f"dependencies = {_array(data.get('resolved_dependencies', []))}",
+    ]
     for package in data.get("package", []):
         lines += [
             "",
@@ -169,6 +191,35 @@ def dump_manifest(data):
                 f"repositories = {_array(artifact.get('repositories', []))}",
             ]
     return "\n".join(lines) + "\n"
+
+
+def load_lock(manifest_path, configuration):
+    """Load a current sidecar lock; stale locks are ignored and regenerated."""
+    path = lock_path(manifest_path)
+    if not path.is_file():
+        return path, None, False
+    try:
+        with path.open("rb") as stream:
+            lock = tomllib.load(stream)
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise PloadError(f"cannot read environment lock {path}: {exc}") from exc
+    if lock.get("schema") != 1:
+        raise PloadError(f"unsupported environment lock schema in {path}")
+    packages = lock.setdefault("package", [])
+    environment = lock.setdefault("environment", {})
+    environment.setdefault("dependencies", [])
+    for package in packages:
+        package.setdefault("sources", [])
+        package.setdefault("artifact", [])
+    current = (
+        lock.get("configuration") == Path(manifest_path).name
+        and lock.get("configuration_sha256") == configuration_digest(configuration)
+    )
+    if current:
+        combined = dict(configuration)
+        combined["package"] = packages
+        validate_manifest(combined)
+    return path, lock, current
 
 
 def load_manifest(path):
@@ -611,9 +662,9 @@ class DeclarativeEnvironmentManager:
                     artifact["repositories"].append(selected_repository)
         validate_manifest(data)
         output.parent.mkdir(parents=True, exist_ok=True)
-        temporary = output.with_name(output.name + ".tmp")
-        temporary.write_text(dump_manifest(data), encoding="utf-8")
-        temporary.replace(output)
+        self._write_manifest(output, data)
+        data["resolved_dependencies"] = pins
+        self._write_lock(output, data)
         return output
 
     def _obtain_wheel(self, interpreter, installed, wheel_dir, index):
@@ -658,12 +709,32 @@ class DeclarativeEnvironmentManager:
             raise PloadError(f"download did not produce one exact wheel for {installed['name']}")
         return matches[0]
 
-    def _lock_requested_dependencies(self, path, data, offline=False):
+    def _load_state(self, manifest_path):
+        path, data = load_manifest(manifest_path)
+        legacy_packages = list(data.get("package", []))
+        _, lock, current = load_lock(path, data)
+        if current:
+            data["package"] = lock.get("package", [])
+            data["resolved_dependencies"] = lock["environment"].get("dependencies", [])
+        elif legacy_packages:
+            # Versions before 1.1.0a8 embedded resolver output in pload.toml.
+            # Keep it long enough to migrate it into the sidecar without a download.
+            data["package"] = legacy_packages
+            data["resolved_dependencies"] = [
+                f"{item['name']}=={item['version']}" for item in legacy_packages
+            ]
+        else:
+            data["package"] = []
+            data["resolved_dependencies"] = []
+        return path, data, current, bool(legacy_packages)
+
+    def _lock_requested_dependencies(
+        self, path, data, lock_current=False, legacy=False, offline=False,
+    ):
         requested = list(data["environment"].get("dependencies", []))
         if not requested:
             return None
         requirements = [_parse_dependency(value) for value in requested]
-        all_exact = all(PIN.fullmatch(item) for item in requested)
         locked = {
             normalized_name(package["name"]): package["version"]
             for package in data.get("package", [])
@@ -675,26 +746,22 @@ class DeclarativeEnvironmentManager:
             ))
             for requirement in requirements
         )
-        exact_lock_matches = not all_exact or {
-            (normalized_name(match.group(1)), match.group(2))
-            for item in requested if (match := PIN.fullmatch(item))
-        } == set(locked.items())
-
-        if data.get("package") and satisfies_requests and exact_lock_matches:
-            if all_exact:
-                return None
+        if data.get("package") and satisfies_requests and (lock_current or legacy):
             resolved = [
                 f"{package['name']}=={package['version']}"
                 for package in sorted(
                     data["package"], key=lambda item: normalized_name(item["name"])
                 )
             ]
-            data["environment"]["dependencies"] = resolved
-            validate_manifest(data)
-            self._write_manifest(path, data)
-            return {"updated": True, "requested": requested, "resolved": resolved}
-
-        if all_exact and not data.get("package"):
+            data["resolved_dependencies"] = resolved
+            if legacy:
+                self._write_manifest(path, data)
+                self._write_lock(path, data)
+                return {
+                    "updated": True, "migrated": True,
+                    "path": str(lock_path(path)),
+                    "requested": requested, "resolved": resolved,
+                }
             return None
 
         network_allowed = (
@@ -786,10 +853,13 @@ class DeclarativeEnvironmentManager:
         records.sort(key=lambda item: normalized_name(item["name"]))
         resolved = [f"{item['name']}=={item['version']}" for item in records]
         data["package"] = records
-        data["environment"]["dependencies"] = resolved
+        data["resolved_dependencies"] = resolved
         validate_manifest(data)
-        self._write_manifest(path, data)
-        return {"updated": True, "requested": requested, "resolved": resolved}
+        self._write_lock(path, data)
+        return {
+            "updated": True, "path": str(lock_path(path)),
+            "requested": requested, "resolved": resolved,
+        }
 
     @staticmethod
     def _write_manifest(path, data):
@@ -797,9 +867,18 @@ class DeclarativeEnvironmentManager:
         temporary.write_text(dump_manifest(data), encoding="utf-8")
         temporary.replace(path)
 
+    @staticmethod
+    def _write_lock(path, data):
+        destination = lock_path(path)
+        temporary = destination.with_name(destination.name + ".tmp")
+        temporary.write_text(dump_lock(path, data), encoding="utf-8")
+        temporary.replace(destination)
+
     def plan(self, manifest_path, offline=False):
-        path, data = load_manifest(manifest_path)
-        lock = self._lock_requested_dependencies(path, data, offline=offline)
+        path, data, current, legacy = self._load_state(manifest_path)
+        lock = self._lock_requested_dependencies(
+            path, data, lock_current=current, legacy=legacy, offline=offline,
+        )
         policy = data["policy"]
         network_allowed = policy.get("network", "allow") == "allow" and not offline
         repositories = data.get("repositories", {})
@@ -916,10 +995,10 @@ class DeclarativeEnvironmentManager:
         return result
 
     def apply(self, manifest_path, name=None, offline=False, progress=None):
-        path, data = load_manifest(manifest_path)
+        path, data, _, _ = self._load_state(manifest_path)
         plan = self.plan(path, offline=offline)
         if plan.get("lock"):
-            path, data = load_manifest(path)
+            path, data, _, _ = self._load_state(path)
         unavailable = [item for item in plan["packages"] if not item["selected"]]
         if unavailable:
             details = []

@@ -2,12 +2,12 @@
 
 ## Unreleased
 
-Pre-release: `1.1.0a7`
+Pre-release: `1.1.0a8`
 
 ### Added
 
-- Make one portable `pload.toml` the source of truth for desired Python,
-  exact dependencies, policies, repositories and locked artifact hashes.
+- Keep user intent in a clean portable `pload.toml` and store pload-managed
+  exact dependency, artifact and hash decisions in sibling `.pload_lock.toml`.
 - Add `pload describe`, `pload plan` and idempotent `pload apply`; resource
   copying, downloading and publication are internal planner/executor steps.
 - Inventory the local wheel cache, adjacent artifacts, local/SSH content stores,
@@ -16,7 +16,7 @@ Pre-release: `1.1.0a7`
   while keeping credentials out of the portable configuration.
 - Reuse exact wheel archives by SHA-256, deduplicate local/SSH storage, record
   detected NVIDIA driver provenance and roll back failed materializations.
-- Add a complete field-by-field `pload.toml` reference, enforce agreement between
+- Add complete field-by-field configuration and lock references, enforce agreement between
   desired dependency pins and package locks, and make policy repositories and
   `publish_missing_artifacts` drive lookup and automatic cache publication.
 - Validate locked wheel Python, ABI and platform tags against the requested
@@ -24,10 +24,12 @@ Pre-release: `1.1.0a7`
   as ready, and compatible mode explicitly plans network re-resolution instead.
 - Accept unpinned dependency intentions such as `numpy` and `pandas>=2`; the
   first online plan resolves the complete wheel dependency closure, records exact
-  versions, hashes and tags in the TOML file, and subsequent plans reuse the lock.
-- Treat edits that add or change dependencies beside an existing `[[package]]`
-  lock as a stale lock to reconcile, not an invalid configuration; re-resolution
+  versions, hashes and tags in the managed lock, and subsequent plans reuse it.
+- Treat edits that add or change dependencies beside an existing lock as a stale
+  lock to reconcile, not an invalid configuration; re-resolution
   uses the complete requested set and prefers existing pload cache wheels.
+- Migrate lock tables embedded by earlier 1.1 previews into `.pload_lock.toml`
+  without another dependency resolution or artifact download.
 
 ### Removed
 

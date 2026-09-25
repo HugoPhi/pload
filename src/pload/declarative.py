@@ -880,12 +880,35 @@ class DeclarativeEnvironmentManager:
         temporary.write_text(dump_lock(path, data), encoding="utf-8")
         temporary.replace(destination)
 
-    def plan(self, manifest_path, offline=False, progress=None):
+    def lock(self, manifest_path, offline=False, progress=None):
+        """Resolve and persist an exact sidecar lock as an explicit mutation."""
         path, data, current, legacy = self._load_state(manifest_path)
-        lock = self._lock_requested_dependencies(
+        result = self._lock_requested_dependencies(
             path, data, lock_current=current, legacy=legacy, offline=offline,
             progress=progress,
         )
+        if result:
+            return result
+        return {
+            "updated": False,
+            "path": str(lock_path(path)),
+            "requested": list(data["environment"].get("dependencies", [])),
+            "resolved": list(data.get("resolved_dependencies", [])),
+        }
+
+    def plan(self, manifest_path, offline=False, progress=None):
+        path, data, current, legacy = self._load_state(manifest_path)
+        dependencies = data["environment"].get("dependencies", [])
+        lock_required = bool(dependencies) and not current
+        sidecar = lock_path(path)
+        lock = {
+            "status": (
+                "current" if current else "legacy" if legacy
+                else "stale" if sidecar.exists() else "missing"
+            ),
+            "path": str(sidecar),
+            "required": lock_required,
+        }
         policy = data["policy"]
         network_allowed = policy.get("network", "allow") == "allow" and not offline
         repositories = data.get("repositories", {})
@@ -899,6 +922,24 @@ class DeclarativeEnvironmentManager:
             python_action = {
                 "method": "install-python", "location": data["environment"]["python"],
                 "status": "network" if network_allowed else "unavailable",
+            }
+        if lock_required:
+            pending = []
+            for value in dependencies:
+                requirement = _parse_dependency(value)
+                exact = PIN.fullmatch(value)
+                pending.append({
+                    "name": requirement.name,
+                    "version": exact.group(2) if exact else str(requirement.specifier) or "unresolved",
+                    "selected": self._candidate(
+                        "lock-required", sidecar, "pending", (0, 0, 0, 0)
+                    ),
+                    "alternatives": [],
+                    "rejections": [],
+                })
+            return {
+                "path": str(path), "name": data["name"], "python": python_action,
+                "packages": pending, "ready": False, "lock": lock,
             }
         repository_checksums = {}
         for package in packages:
@@ -979,7 +1020,7 @@ class DeclarativeEnvironmentManager:
                 "alternatives": candidates[1:],
                 "rejections": rejections,
             })
-        ready = (python_action["status"] != "unavailable"
+        ready = (not lock_required and python_action["status"] != "unavailable"
                  and all(item["selected"] for item in plans))
         return {"path": str(path), "name": data["name"], "python": python_action,
                 "packages": plans, "ready": ready, "lock": lock}
@@ -999,15 +1040,20 @@ class DeclarativeEnvironmentManager:
         result = []
         for pin in data["environment"].get("dependencies", []):
             match = PIN.fullmatch(pin)
+            if not match:
+                continue
             result.append({"name": match.group(1), "version": match.group(2),
                            "sources": ["default"], "artifact": []})
         return result
 
     def apply(self, manifest_path, name=None, offline=False, progress=None):
         path, data, _, _ = self._load_state(manifest_path)
-        plan = self.plan(path, offline=offline)
-        if plan.get("lock"):
-            path, data, _, _ = self._load_state(path)
+        plan = self.plan(path, offline=offline, progress=progress)
+        if plan["lock"]["required"]:
+            raise PloadError(
+                "environment lock is missing or stale; review the configuration, then run "
+                f"'pload lock {path.name}'"
+            )
         unavailable = [item for item in plan["packages"] if not item["selected"]]
         if unavailable:
             details = []

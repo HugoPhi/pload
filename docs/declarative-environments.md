@@ -7,12 +7,14 @@ materializes that state.
 
 ```console
 pload describe v2 -o pload.toml
+pload lock pload.toml
+pload plan pload.toml
 pload apply pload.toml
 ```
 
 `describe` is the bridge for an existing environment. For a new project,
 `pload.toml` may be written by hand with names, ranges or exact
-`NAME==VERSION` requirements; `plan` produces the managed lock.
+`NAME==VERSION` requirements; `lock` produces the managed lock.
 
 ## Two files, two responsibilities
 
@@ -50,7 +52,7 @@ kind = "ssh"
 location = "frpxiaoxin:/home/tibless/pload-cloud"
 ```
 
-`pload plan` writes its decisions to `.pload_lock.toml` in the same directory:
+`pload lock` writes its decisions to `.pload_lock.toml` in the same directory:
 
 ```toml
 schema = 1
@@ -76,8 +78,8 @@ The lock is generated data, not a second user configuration. It records the
 complete transitive dependency closure, exact versions, wheel identities,
 SHA-256 hashes, compatibility tags and known artifact locations. The
 `configuration_sha256` binds it to the current `pload.toml`; editing the user
-configuration makes the old lock stale and the next online plan replaces it
-atomically. Commit both files when reproducibility matters, but normally edit
+configuration makes the old lock stale and the next explicit `pload lock`
+replaces it atomically. Commit both files when reproducibility matters, but normally edit
 only `pload.toml`.
 
 The lock is necessary for **exact** reproduction because a requirement such as
@@ -85,8 +87,8 @@ The lock is necessary for **exact** reproduction because a requirement such as
 or a particular wheel build. Package indexes change over time. The filename and
 SHA-256 in the lock let pload prove that a cached, cloud-hosted or downloaded
 artifact is the same byte sequence chosen originally. Deleting the lock is safe:
-the next online `plan` resolves a new one, but the result may differ. Offline
-planning cannot regenerate a missing or stale lock.
+the next online `pload lock` resolves a new one, but the result may differ.
+`plan` never regenerates it.
 
 Python runtimes and wheel bytes remain in caches, indexes or content-addressed
 repositories; the two TOML files contain only control information. Credentials
@@ -129,17 +131,17 @@ For example, this is a valid initial request:
 dependencies = ["numpy", "pandas>=2,<3"]
 ```
 
-`pload plan` asks pip under the requested interpreter to resolve these requirements
+`pload lock` asks pip under the requested interpreter to resolve these requirements
 and their transitive dependencies as compatible wheels. It then atomically writes
 exact `NAME==VERSION` results, wheel filenames, SHA-256 hashes and tags to
 `.pload_lock.toml`; `pload.toml` remains unchanged. Resolution uses all declared
 indexes, with `default` as the primary index. It requires network access once;
-`--offline` rejects an unlocked file rather than guessing. A second plan is
-read-only and does not run the resolver again.
+`lock --offline` rejects unavailable resolver inputs rather than guessing.
+`plan` is always read-only and never runs the resolver.
 
 Editing dependencies after a lock exists is also supported. For example, adding
 `"torch"` to a configuration with an existing `.pload_lock.toml` marks that lock
-as stale. The next online plan resolves the complete
+as stale. The next online `pload lock` resolves the complete
 requested set—including existing exact constraints—rather than rejecting the
 file or silently dropping the new package. The resolver receives the pload wheel
 cache as a local candidate source, so compatible cached wheels are preferred and
@@ -147,7 +149,7 @@ only missing artifacts need index access. The reconciled complete lock replaces
 the old one atomically.
 
 Configurations produced by pre-`1.1.0a8` previews may still contain embedded
-`[[package]]` tables. The first `plan` migrates those tables to
+`[[package]]` tables. The first `pload lock` migrates those tables to
 `.pload_lock.toml` without downloading again and rewrites `pload.toml` in the
 clean declaration-only format. Because older previews replaced the original
 direct requirements with the complete closure, they cannot always recover which
@@ -265,7 +267,7 @@ There is one array entry for every application dependency:
 | `artifact` | array of tables | no | Exact wheel identities accepted for this package. Exact policy needs at least one reachable artifact route; compatible policy may omit artifacts and re-resolve the pinned version. |
 
 Users should not add or remove these records manually. Delete `.pload_lock.toml`
-and run `pload plan` when a complete re-resolution is wanted.
+and run `pload lock` when a complete re-resolution is wanted.
 
 ### `[[package.artifact]]`: exact wheel identity
 
@@ -354,6 +356,21 @@ pload describe v2 --mode compatible
 
 Compatible mode is useful for exploration, but it is weaker than an artifact lock.
 
+## Lock the declared dependencies
+
+```console
+pload lock
+pload lock project.pload.toml
+pload lock project.pload.toml --offline
+```
+
+`lock` is the explicit boundary at which pload may invoke pip, resolve the full
+dependency closure, obtain wheel bytes, populate the local cache and atomically
+write `.pload_lock.toml`. It does not modify `pload.toml`. Run it after changing
+Python, dependencies, indexes or any other resolution input. Keeping this as a
+separate command prevents a read-only preview from changing the resources it is
+supposed to inspect.
+
 ## Plan against available resources
 
 ```console
@@ -363,14 +380,14 @@ pload plan --offline
 pload plan --json
 ```
 
-If no current `.pload_lock.toml` exists, the first online `plan` performs a lock
-step before resource selection—even when every direct requirement is pinned. Its
-output reports that `.pload_lock.toml` was written. The generated lock contains the
-complete wheel dependency closure, so `apply` does not ask pip to resolve
-dependencies again. Schema 1 currently requires wheel availability during this
-automatic lock step; it does not create a portable exact lock from an sdist.
+`plan` is strictly read-only. It never invokes pip, downloads a package, fills
+the cache, writes a lock or changes the user configuration. If
+`.pload_lock.toml` is absent or its configuration digest is stale, the plan is
+not ready: direct requirements are shown as `lock-required / pending` and the
+user is told to run `pload lock`. This is intentionally different from a route
+that only happens to become ready because planning downloaded it.
 
-The planner inventories:
+With a current lock, the planner inventories:
 
 1. installed and discoverable Python interpreters;
 2. the pload wheel cache;
@@ -406,15 +423,16 @@ pload apply project.pload.toml --offline
 `apply` performs the internal operations that were previously exposed as export,
 push, pull and restore:
 
-1. resolve or install the declared Python;
-2. verify implementation, exact Python version, OS and architecture;
-3. reuse exact local artifacts;
-4. retrieve missing SHA-addressed artifacts from configured repositories;
-5. fall back to an index only when policy permits it;
-6. verify every artifact before installation;
-7. create and register the environment;
-8. install exact packages and run `pip check`;
-9. record the applied configuration digest inside the environment.
+1. require a current `.pload_lock.toml` and refuse implicit re-resolution;
+2. resolve or install the declared Python;
+3. verify implementation, exact Python version, OS and architecture;
+4. reuse exact local artifacts;
+5. retrieve missing SHA-addressed artifacts from configured repositories;
+6. fall back to an index only when policy permits it;
+7. verify every artifact before installation;
+8. create and register the environment;
+9. install exact packages and run `pip check`;
+10. record the applied configuration digest inside the environment.
 
 Running `apply` again is idempotent when the environment already carries the same
 configuration digest. If the name exists with different state, pload refuses to

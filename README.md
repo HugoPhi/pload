@@ -86,9 +86,14 @@ then performs transfers and installation internally:
 
 ```console
 pload describe v2 -o pload.toml
+pload lock pload.toml
 pload plan pload.toml
 pload apply pload.toml
 ```
+
+`plan` is strictly read-only: it never invokes pip, downloads packages, or
+changes either TOML file. Run `lock` explicitly after editing dependencies;
+`apply` refuses a missing or stale lock instead of resolving behind your back.
 
 See the [declarative environment guide](docs/declarative-environments.md) for the
 [complete TOML field reference](docs/declarative-environments.md#complete-ploadtoml-field-reference),
@@ -114,7 +119,7 @@ pload-install --yes --package-spec "pload==1.0.0"
 To opt into the declarative-environment pre-release for testing:
 
 ```console
-pload-install --yes --package-spec "pload==1.1.0a9"
+pload-install --yes --package-spec "pload==1.1.0a10"
 ```
 
 To always follow the newest published release instead of pinning a version,

@@ -29,6 +29,7 @@ COMMAND_ALIASES = {
     "python": ("py",),
     "config": ("cfg",),
     "describe": (),
+    "lock": (),
     "plan": (),
     "apply": (),
     "repo": (),
@@ -297,6 +298,14 @@ Aliases: system=sys, managed=uv""",
         metavar="PACKAGE=URL",
         help="package-specific index; repeat for packages such as CUDA-enabled torch",
     )
+    lock = subparsers.add_parser(
+        "lock", description="Resolve dependencies and write the managed environment lock.",
+        help="resolve and write .pload_lock.toml",
+    )
+    lock.add_argument("file", nargs="?", default="pload.toml",
+                      help="environment configuration (default: pload.toml)")
+    lock.add_argument("--offline", "-o", action="store_true",
+                      help="use only already available resolver resources")
     plan = subparsers.add_parser(
         "plan", description="Compare a declarative environment with all available resources.",
         help="explain how pload would satisfy a configuration",
@@ -445,12 +454,10 @@ def _global_options_table(root_parser):
 
 def print_declarative_plan(plan):
     console = Console(highlight=False)
-    if plan.get("lock"):
-        count = len(plan["lock"]["resolved"])
-        action = "Migrated" if plan["lock"].get("migrated") else "Locked"
+    if plan["lock"]["required"]:
         console.print(
-            f"[bold green]✓ {action} {count} packages[/] in "
-            f"[cyan]{plan['lock']['path']}[/]"
+            f"[bold yellow]Lock: {plan['lock']['status']}[/] · plan is read-only; "
+            "run [bold green]pload lock[/] to resolve dependencies"
         )
     python = plan["python"]
     console.print(Panel.fit(
@@ -552,6 +559,7 @@ def _brief_help(parser, command_path, root_parser=None):
             "config": "Show effective configuration",
             "shell-init": "Print shell activation integration",
             "describe": "Write one portable configuration for an existing environment",
+            "lock": "Resolve dependencies into .pload_lock.toml",
             "plan": "Compare a configuration with available resources",
             "apply": "Materialize the environment declared by pload.toml",
             "repo": "Manage local and SSH artifact providers",
@@ -634,6 +642,8 @@ def render_landing():
     table.add_row("pload cfg", "Show where pload stores its data")
     table.add_row("pload python list", "Find every usable Python interpreter")
     table.add_row("pload describe v1", "Describe an environment in pload.toml")
+    table.add_row("pload lock", "Resolve and record exact package artifacts")
+    table.add_row("pload plan", "Preview without downloading or changing files")
     table.add_row("pload apply", "Create exactly what pload.toml declares")
     table.add_row("pload new", "Open guided environment creation")
     table.add_row("pload new -n data -v 3.12", "Create a named virtual environment")
@@ -648,7 +658,7 @@ def shell_script(shell):
     if shell in {"bash", "zsh"}:
         return r'''pload() {
     case "${1:-}" in
-        ""|new|init|i|rm|remove|del|delete|list|ls|path|p|shell-init|shell|python|py|config|cfg|describe|plan|apply|repo|-*)
+        ""|new|init|i|rm|remove|del|delete|list|ls|path|p|shell-init|shell|python|py|config|cfg|describe|lock|plan|apply|repo|-*)
             command pload "$@"
             ;;
         *)
@@ -661,7 +671,7 @@ def shell_script(shell):
     if shell == "fish":
         return r'''function pload
     switch "$argv[1]"
-        case '' new init i rm remove del delete list ls path p shell-init shell python py config cfg describe plan apply repo '-*'
+        case '' new init i rm remove del delete list ls path p shell-init shell python py config cfg describe lock plan apply repo '-*'
             command pload $argv
         case '*'
             set -l name .
@@ -675,7 +685,7 @@ def shell_script(shell):
 end'''
     return r'''function pload {
     param([Parameter(ValueFromRemainingArguments = $true)][string[]]$PloadArgs)
-    $commands = @('new', 'init', 'i', 'rm', 'remove', 'del', 'delete', 'list', 'ls', 'path', 'p', 'shell-init', 'shell', 'python', 'py', 'config', 'cfg', 'describe', 'plan', 'apply', 'repo', '-h', '--help', '--version')
+    $commands = @('new', 'init', 'i', 'rm', 'remove', 'del', 'delete', 'list', 'ls', 'path', 'p', 'shell-init', 'shell', 'python', 'py', 'config', 'cfg', 'describe', 'lock', 'plan', 'apply', 'repo', '-h', '--help', '--version')
     $backend = Get-Command -Name @('pload.exe', 'pload.cmd') -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $backend) { throw 'pload executable not found on PATH' }
     if ($PloadArgs.Count -eq 0) {
@@ -741,7 +751,7 @@ def run(argv=None):
     venvs = VenvManager(config)
     dependencies = DependencyManager(config)
 
-    if command in {"describe", "plan", "apply", "repo"}:
+    if command in {"describe", "lock", "plan", "apply", "repo"}:
         if command == "repo":
             from pload.snapshots import RepositoryManager
 
@@ -765,6 +775,21 @@ def run(argv=None):
                     Text("• " + message, style="cyan")
                 ),
             ))
+        elif command == "lock":
+            progress_console = Console(highlight=False, stderr=True)
+            with progress_console.status(
+                "[cyan]Reading configuration…[/]", spinner="dots",
+            ) as status:
+                result = manager.lock(
+                    args.file, args.offline,
+                    progress=lambda message: status.update(f"[cyan]{message}…[/]"),
+                )
+            count = len(result["resolved"])
+            action = "Wrote" if result["updated"] else "Reused"
+            Console(highlight=False).print(
+                f"[bold green]✓ {action} {count} locked packages[/] in "
+                f"[cyan]{result['path']}[/]"
+            )
         elif command == "plan":
             if args.json:
                 plan = manager.plan(args.file, args.offline)

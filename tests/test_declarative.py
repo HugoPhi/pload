@@ -90,7 +90,7 @@ def test_manifest_roundtrip(tmp_path):
     assert locked["package"] == data["package"]
 
 
-def test_plan_migrates_legacy_embedded_lock_without_resolving(tmp_path, monkeypatch):
+def test_lock_migrates_legacy_embedded_lock_without_resolving(tmp_path, monkeypatch):
     data = simple_manifest("exact")
     path = tmp_path / "pload.toml"
     legacy = dump_manifest(data) + """
@@ -105,9 +105,9 @@ sources = ["default"]
         lambda *args, **kwargs: pytest.fail("legacy migration invoked the resolver"),
     )
 
-    plan = DeclarativeEnvironmentManager(ConfigManager(home=tmp_path / "home")).plan(path)
+    result = DeclarativeEnvironmentManager(ConfigManager(home=tmp_path / "home")).lock(path)
 
-    assert plan["lock"]["migrated"] is True
+    assert result["migrated"] is True
     assert "[[package]]" not in path.read_text(encoding="utf-8")
     _, configuration = load_manifest(path)
     _, locked, current = load_lock(path, configuration)
@@ -264,7 +264,7 @@ def test_cache_plan_applies_without_package_network_access(tmp_path, monkeypatch
     assert output == "42"
 
 
-def test_plan_locks_unpinned_dependencies_once_then_applies_from_cache(tmp_path, monkeypatch):
+def test_lock_resolves_once_and_plan_remains_read_only(tmp_path, monkeypatch):
     config = ConfigManager(home=tmp_path / "home")
     config.get_python_path = lambda version=None: Path(sys.executable)
     wheel = tiny_wheel(tmp_path / "fixture")
@@ -297,9 +297,20 @@ def test_plan_locks_unpinned_dependencies_once_then_applies_from_cache(tmp_path,
         return original_execute(command, *args, **kwargs)
 
     monkeypatch.setattr(declarative_module, "execute", fake_resolver)
+    before = manifest.read_bytes()
+    pending = manager.plan(manifest)
+    assert pending["lock"]["status"] == "missing"
+    assert pending["lock"]["required"] is True
+    assert pending["packages"][0]["selected"]["method"] == "lock-required"
+    assert download_calls == []
+    assert manifest.read_bytes() == before
+    assert not lock_path(manifest).exists()
+
+    result = manager.lock(manifest)
+    assert result["requested"] == ["pload-demo>=1"]
+    assert result["resolved"] == ["pload-demo==1.0"]
     first = manager.plan(manifest)
-    assert first["lock"]["requested"] == ["pload-demo>=1"]
-    assert first["lock"]["resolved"] == ["pload-demo==1.0"]
+    assert first["lock"]["status"] == "current"
     assert first["packages"][0]["selected"]["method"] == "cache"
     _, configuration = load_manifest(manifest)
     assert configuration["environment"]["dependencies"] == ["pload-demo>=1"]
@@ -309,7 +320,7 @@ def test_plan_locks_unpinned_dependencies_once_then_applies_from_cache(tmp_path,
     assert locked["package"][0]["artifact"][0]["filename"] == wheel.name
 
     second = manager.plan(manifest)
-    assert second["lock"] is None
+    assert second["lock"]["status"] == "current"
     assert len(download_calls) == 1
     restored = manager.apply(manifest)
     assert len(download_calls) == 1
@@ -352,14 +363,25 @@ def test_plan_relocks_when_new_dependency_makes_existing_lock_stale(tmp_path, mo
         return ""
 
     monkeypatch.setattr(declarative_module, "execute", fake_resolver)
+    before_manifest = manifest.read_bytes()
+    before_lock = lock_path(manifest).read_bytes()
+    plan = manager.plan(manifest)
+    assert plan["lock"]["status"] == "stale"
+    assert plan["lock"]["required"] is True
+    assert calls == []
+    assert manifest.read_bytes() == before_manifest
+    assert lock_path(manifest).read_bytes() == before_lock
+    with pytest.raises(PloadError, match="pload lock"):
+        manager.apply(manifest)
+
     progress = []
-    plan = manager.plan(manifest, progress=progress.append)
+    result = manager.lock(manifest, progress=progress.append)
     assert len(calls) == 1
     assert progress == [
         f"Configuration changed; resolving dependencies for Python {platform.python_version()}"
     ]
-    assert plan["lock"]["requested"] == ["pload-demo==1.0", "extra-demo"]
-    assert plan["lock"]["resolved"] == ["extra-demo==1.0", "pload-demo==1.0"]
+    assert result["requested"] == ["pload-demo==1.0", "extra-demo"]
+    assert result["resolved"] == ["extra-demo==1.0", "pload-demo==1.0"]
     _, configuration = load_manifest(manifest)
     assert configuration["environment"]["dependencies"] == [
         "pload-demo==1.0", "extra-demo",
@@ -485,8 +507,9 @@ def test_declarative_commands_and_shell_integration(capsys):
         "describe", "v1", "-s", "torch=https://download.pytorch.org/whl/cu121",
     ])
     assert parsed.package_sources == ["torch=https://download.pytorch.org/whl/cu121"]
+    assert parser.parse_args(["lock"]).file == "pload.toml"
     assert parser.parse_args(["apply"]).file == "pload.toml"
-    for command in ("describe", "plan", "apply"):
+    for command in ("describe", "lock", "plan", "apply"):
         assert main([command, "-h"]) == 0
         for shell in ("bash", "zsh", "fish", "powershell"):
             assert command in shell_script(shell)

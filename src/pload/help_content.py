@@ -55,14 +55,15 @@ Use `pload cfg` to see the exact effective paths before creating anything.
 
 ```console
 $ pload describe v1 -o pload.toml
+$ pload lock pload.toml
 $ pload plan pload.toml
 $ pload apply pload.toml
 ```
 
-The TOML file describes the desired Python, exact packages, platform, policies,
-artifact hashes, indexes and logical artifact providers. `apply` inventories the
-current machine and automatically reuses, copies or downloads the best valid
-resources; users do not perform separate upload, download or migration steps.
+`pload.toml` describes user intent and `.pload_lock.toml` records exact package
+artifacts. `plan` is strictly read-only. `lock` is the explicit operation that
+resolves dependencies and may download artifacts; `apply` only accepts a current
+lock and materializes its selected routes.
 """,
     ("new",): r"""
 # Create a managed environment
@@ -376,14 +377,27 @@ pload plan --json
 ```
 
 Planning reads the configuration, discovers Python interpreters and checks local
-caches, adjacent artifacts, content-addressed repositories and declared indexes.
+caches, adjacent artifacts and content-addressed repositories.
 Incompatible resources are rejected first; valid routes are ordered by exactness,
 compatibility risk, transfer, execution cost and a deterministic tie-breaker.
-Dependencies may initially be unpinned (`numpy`, `pandas>=2`). The first online
-plan resolves their complete wheel dependency closure, writes exact versions and
-artifact hashes back to the TOML file, then plans from that lock. Later plans do
-not resolve again; `--offline` requires the lock to exist already.
-Planning is optional transparency: normal users can go directly to `pload apply`.
+It never invokes pip, downloads packages, writes a lock or changes either TOML
+file. A missing or stale lock is reported as `lock-required / pending`; run
+`pload lock` explicitly before planning exact resource routes.
+"""
+GUIDES[("lock",)] = r"""
+# Resolve the user declaration into an exact managed lock
+
+```console
+pload lock
+pload lock project.pload.toml
+pload lock --offline
+```
+
+Locking is an explicit mutating operation. It resolves direct and transitive
+dependencies for the configured Python, obtains exact wheels when necessary,
+computes SHA-256 identities and atomically writes `.pload_lock.toml` beside the
+configuration. `pload.toml` is never rewritten. Run it after changing Python,
+dependencies, sources or another resolution input.
 """
 GUIDES[("apply",)] = r"""
 # Materialize the configuration
@@ -394,10 +408,11 @@ pload apply project.pload.toml -n project-copy
 pload apply --offline
 ```
 
-Apply resolves or installs Python, obtains exact artifacts through the selected
+Apply requires a current `.pload_lock.toml`, then installs Python when needed,
+obtains exact artifacts through the selected
 resource routes, verifies hashes, creates the environment, installs packages and
-runs `pip check`. Upload, download and copying are internal plan steps rather than
-separate user commands. Reapplying the same configuration is idempotent; an
+runs `pip check`. It never silently resolves or updates a stale lock. Reapplying
+the same configuration is idempotent; an
 existing environment with different state is never silently overwritten.
 """
 GUIDES[("repo",)] = r"""

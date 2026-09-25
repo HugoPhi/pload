@@ -2,14 +2,14 @@
 
 ## Unreleased
 
-Pre-release: `1.1.0a9`
+Pre-release: `1.1.0a10`
 
 ### Added
 
 - Keep user intent in a clean portable `pload.toml` and store pload-managed
   exact dependency, artifact and hash decisions in sibling `.pload_lock.toml`.
-- Add `pload describe`, `pload plan` and idempotent `pload apply`; resource
-  copying, downloading and publication are internal planner/executor steps.
+- Add `pload describe`, explicit `pload lock`, read-only `pload plan` and
+  idempotent `pload apply`; downloading cannot be triggered by planning.
 - Inventory the local wheel cache, adjacent artifacts, local/SSH content stores,
   configured indexes and Python installations before choosing a route.
 - Allow package-specific indexes in `describe`, including CUDA wheel indexes,
@@ -23,16 +23,17 @@ Pre-release: `1.1.0a9`
   runtime during planning; incompatible cache entries can no longer be reported
   as ready, and compatible mode explicitly plans network re-resolution instead.
 - Accept unpinned dependency intentions such as `numpy` and `pandas>=2`; the
-  first online plan resolves the complete wheel dependency closure, records exact
-  versions, hashes and tags in the managed lock, and subsequent plans reuse it.
+  explicit lock command resolves the complete wheel dependency closure, records
+  exact versions, hashes and tags, and subsequent plans inspect it read-only.
 - Treat edits that add or change dependencies beside an existing lock as a stale
   lock to reconcile, not an invalid configuration; re-resolution
   uses the complete requested set and prefers existing pload cache wheels.
 - Migrate lock tables embedded by earlier 1.1 previews into `.pload_lock.toml`
   without another dependency resolution or artifact download.
-- Show an animated planning status immediately, including dependency-resolution
-  and artifact-repository phases, instead of appearing frozen while pip or SSH
-  work is captured in the background.
+- Show animated status for explicit locking and artifact-repository inspection
+  instead of appearing frozen while pip or SSH work is captured in the background.
+- Refuse `apply` when the lock is absent or stale instead of resolving and
+  downloading implicitly.
 
 ### Removed
 

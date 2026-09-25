@@ -1,3 +1,4 @@
+import io
 import platform
 import shutil
 import sys
@@ -358,7 +359,7 @@ def test_plan_reuses_package_from_compatible_pload_environment(tmp_path, monkeyp
     ]) == "42"
 
 
-def test_lock_resolves_once_and_plan_remains_read_only(tmp_path, monkeypatch):
+def test_plan_resolves_metadata_once_without_downloading_wheels(tmp_path, monkeypatch):
     config = ConfigManager(home=tmp_path / "home")
     config.get_python_path = lambda version=None: Path(sys.executable)
     wheel = tiny_wheel(tmp_path / "fixture")
@@ -377,35 +378,29 @@ def test_lock_resolves_once_and_plan_remains_read_only(tmp_path, monkeypatch):
     write_configuration(manifest, data, with_lock=False)
     manager = DeclarativeEnvironmentManager(config)
     original_execute = declarative_module.execute
-    download_calls = []
+    resolver_calls = []
 
-    def fake_resolver(command, *args, **kwargs):
-        if "download" in command:
-            download_calls.append(command)
-            assert "--no-deps" not in command
-            destination = Path(command[command.index("--dest") + 1])
-            shutil.copyfile(wheel, destination / wheel.name)
-            return ""
-        if "install" in command:
-            assert "--no-index" in command
-        return original_execute(command, *args, **kwargs)
+    def fake_metadata(requirements, sources, environment, supported_tags):
+        resolver_calls.append(list(requirements))
+        return [{
+            "name": "pload-demo", "version": "1.0", "sources": ["default"],
+            "artifact": [{
+                "filename": wheel.name, "sha256": digest(wheel),
+                "tags": ["py3-none-any"], "repositories": [],
+                "url": "https://example.invalid/" + wheel.name,
+                "size": wheel.stat().st_size, "metadata_sha256": "",
+            }],
+        }]
 
-    monkeypatch.setattr(declarative_module, "execute", fake_resolver)
+    monkeypatch.setattr(declarative_module, "resolve_metadata", fake_metadata)
     before = manifest.read_bytes()
-    pending = manager.plan(manifest)
-    assert pending["lock"]["status"] == "missing"
-    assert pending["lock"]["required"] is True
-    assert pending["packages"][0]["selected"]["method"] == "lock-required"
-    assert download_calls == []
-    assert manifest.read_bytes() == before
-    assert not lock_path(manifest).exists()
-
-    result = manager.lock(manifest)
-    assert result["requested"] == ["pload-demo>=1"]
-    assert result["resolved"] == ["pload-demo==1.0"]
     first = manager.plan(manifest)
-    assert first["lock"]["status"] == "current"
-    assert first["packages"][0]["selected"]["method"] == "cache"
+    assert first["lock"]["status"] == "generated"
+    assert first["lock"]["required"] is False
+    assert first["packages"][0]["selected"]["method"] == "index-exact"
+    assert resolver_calls == [["pload-demo>=1"]]
+    assert manifest.read_bytes() == before
+    assert lock_path(manifest).is_file()
     _, configuration = load_manifest(manifest)
     assert configuration["environment"]["dependencies"] == ["pload-demo>=1"]
     _, locked, current = load_lock(manifest, configuration)
@@ -415,16 +410,19 @@ def test_lock_resolves_once_and_plan_remains_read_only(tmp_path, monkeypatch):
 
     second = manager.plan(manifest)
     assert second["lock"]["status"] == "current"
-    assert len(download_calls) == 1
+    assert len(resolver_calls) == 1
+    manager.cache.mkdir(parents=True)
+    shutil.copyfile(wheel, manager.cache / wheel.name)
+    manager.plan(manifest)
     restored = manager.apply(manifest)
-    assert len(download_calls) == 1
+    assert len(resolver_calls) == 1
     output = original_execute([
         config.get_pip_command(restored)[0], "-c", "import pload_demo; print(pload_demo.answer)",
     ])
     assert output == "42"
 
 
-def test_plan_relocks_when_new_dependency_makes_existing_lock_stale(tmp_path, monkeypatch):
+def test_plan_refreshes_stale_lock_using_only_metadata(tmp_path, monkeypatch):
     config = ConfigManager(home=tmp_path / "home")
     config.get_python_path = lambda version=None: Path(sys.executable)
     demo = tiny_wheel(tmp_path / "fixture")
@@ -444,38 +442,24 @@ def test_plan_relocks_when_new_dependency_makes_existing_lock_stale(tmp_path, mo
     manager = DeclarativeEnvironmentManager(config)
     calls = []
 
-    def fake_resolver(command, *args, **kwargs):
-        if "download" not in command:
-            return ""
-        calls.append(command)
-        assert "--find-links" in command
-        assert "pload-demo==1.0" in command
-        assert "extra-demo" in command
-        destination = Path(command[command.index("--dest") + 1])
-        shutil.copyfile(demo, destination / demo.name)
-        shutil.copyfile(extra, destination / extra.name)
-        return ""
+    def fake_metadata(requirements, sources, environment, supported_tags):
+        calls.append(list(requirements))
+        return [
+            {"name": name, "version": "1.0", "sources": ["default"],
+             "artifact": [{"filename": wheel.name, "sha256": digest(wheel),
+                            "tags": ["py3-none-any"], "repositories": []}]}
+            for name, wheel in (("pload-demo", demo), ("extra-demo", extra))
+        ]
 
-    monkeypatch.setattr(declarative_module, "execute", fake_resolver)
+    monkeypatch.setattr(declarative_module, "resolve_metadata", fake_metadata)
     before_manifest = manifest.read_bytes()
     before_lock = lock_path(manifest).read_bytes()
     plan = manager.plan(manifest)
-    assert plan["lock"]["status"] == "stale"
-    assert plan["lock"]["required"] is True
-    assert calls == []
+    assert plan["lock"]["status"] == "generated"
+    assert plan["lock"]["required"] is False
+    assert calls == [["pload-demo==1.0", "extra-demo"]]
     assert manifest.read_bytes() == before_manifest
-    assert lock_path(manifest).read_bytes() == before_lock
-    with pytest.raises(PloadError, match="missing or stale"):
-        manager.apply(manifest)
-
-    progress = []
-    result = manager.lock(manifest, progress=progress.append)
-    assert len(calls) == 1
-    assert progress == [
-        f"Configuration changed; resolving dependencies for Python {platform.python_version()}"
-    ]
-    assert result["requested"] == ["pload-demo==1.0", "extra-demo"]
-    assert result["resolved"] == ["extra-demo==1.0", "pload-demo==1.0"]
+    assert lock_path(manifest).read_bytes() != before_lock
     _, configuration = load_manifest(manifest)
     assert configuration["environment"]["dependencies"] == [
         "pload-demo==1.0", "extra-demo",
@@ -636,6 +620,48 @@ def test_apply_obeys_selected_route_without_fallback(tmp_path, monkeypatch):
     with pytest.raises(PloadError, match="planned route failed.*cache"):
         manager.apply(manifest)
     assert calls == ["cache"]
+
+
+def test_apply_downloads_the_exact_url_saved_by_plan(tmp_path, monkeypatch):
+    config = ConfigManager(home=tmp_path / "home")
+    config.get_python_path = lambda version=None: Path(sys.executable)
+    wheel = tiny_wheel(tmp_path / "fixture")
+    data = simple_manifest("exact")
+    data["name"] = "exact-url"
+    data["environment"].update({
+        "python": platform.python_version(),
+        "implementation": sys.implementation.name,
+        "system": platform.system(),
+        "machine": platform.machine(),
+        "dependencies": ["pload-demo==1.0"],
+    })
+    artifact_url = "https://files.example.invalid/" + wheel.name
+    data["package"] = [{
+        "name": "pload-demo", "version": "1.0", "sources": ["default"],
+        "artifact": [{
+            "filename": wheel.name, "sha256": digest(wheel),
+            "tags": ["py3-none-any"], "repositories": [],
+            "url": artifact_url, "size": wheel.stat().st_size,
+        }],
+    }]
+    manifest = tmp_path / "project" / "pload.toml"
+    manifest.parent.mkdir()
+    write_configuration(manifest, data)
+    manager = DeclarativeEnvironmentManager(config)
+    assert manager.plan(manifest)["packages"][0]["selected"]["method"] == "index-exact"
+    requested = []
+
+    def fake_urlopen(request, timeout):
+        requested.append(request.full_url)
+        return io.BytesIO(wheel.read_bytes())
+
+    monkeypatch.setattr(declarative_module, "urlopen", fake_urlopen)
+    restored = manager.apply(manifest)
+    assert requested == [artifact_url]
+    assert execute([
+        config.get_pip_command(restored)[0], "-c",
+        "import pload_demo; print(pload_demo.answer)",
+    ]) == "42"
 
 
 def test_apply_rejects_plan_that_omits_a_locked_package(tmp_path):

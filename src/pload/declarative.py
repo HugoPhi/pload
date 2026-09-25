@@ -13,6 +13,7 @@ import uuid
 import zipfile
 from pathlib import Path
 from urllib.parse import urlsplit
+from urllib.request import Request, urlopen
 
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.tags import compatible_tags, cpython_tags, platform_tags
@@ -27,6 +28,7 @@ from pload.errors import PloadError
 from pload.managers.platform import PythonNotFoundError
 from pload.managers.pyversion import PythonManager
 from pload.managers.venv import VenvManager
+from pload.metadata_resolver import resolve_metadata
 from pload.resource_plan import file_digest, load_plan, write_plan
 from pload.snapshots import RepositoryManager, digest, execute, probe, public_index, safe_name
 
@@ -193,6 +195,14 @@ def dump_lock(manifest_path, data):
                 f"tags = {_array(artifact.get('tags', []))}",
                 f"repositories = {_array(artifact.get('repositories', []))}",
             ]
+            if artifact.get("url"):
+                lines.append(f"url = {_quoted(artifact['url'])}")
+            if artifact.get("size") is not None:
+                lines.append(f"size = {int(artifact['size'])}")
+            if artifact.get("metadata_sha256"):
+                lines.append(
+                    f"metadata_sha256 = {_quoted(artifact['metadata_sha256'])}"
+                )
     return "\n".join(lines) + "\n"
 
 
@@ -325,6 +335,13 @@ def validate_manifest(data):
                         f"artifact {artifact['filename']} references unknown repository "
                         f"{repository_name}"
                     )
+            if artifact.get("url"):
+                parsed_artifact_url = urlsplit(artifact["url"])
+                if (parsed_artifact_url.scheme not in {"http", "https"}
+                        or not parsed_artifact_url.netloc
+                        or parsed_artifact_url.username
+                        or parsed_artifact_url.query):
+                    raise PloadError(f"invalid public artifact URL for {package['name']}")
     # A dependency edit can intentionally make the existing package lock stale.
     # Planning reconciles and rewrites it; validation only checks each section's
     # shape and internal safety.
@@ -988,28 +1005,52 @@ class DeclarativeEnvironmentManager:
                 "status": "network" if network_allowed else "unavailable",
             }
         if lock_required:
-            pending = []
-            for value in dependencies:
-                requirement = _parse_dependency(value)
-                exact = PIN.fullmatch(value)
-                pending.append({
-                    "name": requirement.name,
-                    "version": exact.group(2) if exact else str(requirement.specifier) or "unresolved",
-                    "selected": self._candidate(
-                        "lock-required", sidecar, "pending", (0, 0, 0, 0)
-                    ),
-                    "alternatives": [],
-                    "rejections": [],
-                })
-            result = {
-                "path": str(path), "name": data["name"], "python": python_action,
-                "packages": pending, "ready": False, "lock": lock,
-            }
-            result["plan_path"] = str(write_plan(
-                path, configuration_digest(data),
-                file_digest(sidecar) if sidecar.is_file() else "", result,
-            ))
-            return result
+            if network_allowed:
+                sources = [
+                    (name, source["url"]) for name, source in data.get("sources", {}).items()
+                    if source.get("kind") == "index"
+                ]
+                if not sources:
+                    raise PloadError("metadata resolution requires at least one index source")
+                if progress:
+                    progress(
+                        f"Resolving dependency metadata for Python "
+                        f"{data['environment']['python']}"
+                    )
+                packages = resolve_metadata(
+                    dependencies, sources, data["environment"], supported_tags,
+                )
+                data["package"] = packages
+                data["resolved_dependencies"] = [
+                    f"{package['name']}=={package['version']}" for package in packages
+                ]
+                self._write_lock(path, data)
+                current = True
+                lock_required = False
+                lock.update({"status": "generated", "required": False})
+            else:
+                pending = []
+                for value in dependencies:
+                    requirement = _parse_dependency(value)
+                    exact = PIN.fullmatch(value)
+                    pending.append({
+                        "name": requirement.name,
+                        "version": exact.group(2) if exact else str(requirement.specifier) or "unresolved",
+                        "selected": self._candidate(
+                            "lock-required", sidecar, "pending", (0, 0, 0, 0)
+                        ),
+                        "alternatives": [],
+                        "rejections": [],
+                    })
+                result = {
+                    "path": str(path), "name": data["name"], "python": python_action,
+                    "packages": pending, "ready": False, "lock": lock,
+                }
+                result["plan_path"] = str(write_plan(
+                    path, configuration_digest(data),
+                    file_digest(sidecar) if sidecar.is_file() else "", result,
+                ))
+                return result
         repository_checksums = {}
         for package in packages:
             for artifact in package.get("artifact", []):
@@ -1420,19 +1461,35 @@ with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as bundle:
                 destination, path.parent,
             )
         elif selected["method"] == "index-exact":
-            source = data["sources"][selected["location"]]
-            download = stage / normalized_name(package["name"])
-            download.mkdir(exist_ok=True)
-            execute([
-                str(self.config.get_python_path(data["environment"]["python"])),
-                "-m", "pip", "download", "--only-binary=:all:", "--no-deps",
-                "--dest", str(download), "--index-url", source["url"],
-                f"{package['name']}=={package['version']}",
-            ])
-            candidate = download / artifact["filename"]
-            if not candidate.is_file():
-                raise PloadError(f"index did not provide locked artifact {artifact['filename']}")
-            shutil.copyfile(candidate, destination)
+            if artifact.get("url"):
+                temporary = stage / artifact["filename"]
+                try:
+                    request = Request(
+                        artifact["url"], headers={"User-Agent": "pload-apply/1"},
+                    )
+                    with urlopen(request, timeout=60) as response, temporary.open("wb") as output:
+                        shutil.copyfileobj(response, output)
+                except OSError as exc:
+                    raise PloadError(f"cannot download planned artifact: {exc}") from exc
+                if digest(temporary) != artifact["sha256"]:
+                    raise PloadError("downloaded artifact does not match the lock checksum")
+                shutil.copyfile(temporary, destination)
+            else:
+                source = data["sources"][selected["location"]]
+                download = stage / normalized_name(package["name"])
+                download.mkdir(exist_ok=True)
+                execute([
+                    str(self.config.get_python_path(data["environment"]["python"])),
+                    "-m", "pip", "download", "--only-binary=:all:", "--no-deps",
+                    "--dest", str(download), "--index-url", source["url"],
+                    f"{package['name']}=={package['version']}",
+                ])
+                candidate = download / artifact["filename"]
+                if not candidate.is_file():
+                    raise PloadError(
+                        f"index did not provide locked artifact {artifact['filename']}"
+                    )
+                shutil.copyfile(candidate, destination)
         else:
             raise PloadError(f"unsupported acquisition method: {selected['method']}")
 

@@ -65,6 +65,14 @@ def dump_plan(configuration_path, configuration_sha256, lock_sha256, plan):
                 f"filename = {_quoted(artifact['filename'])}",
                 f"sha256 = {_quoted(artifact['sha256'])}",
             ]
+            if artifact.get("url"):
+                lines.append(f"url = {_quoted(artifact['url'])}")
+            if artifact.get("size") is not None:
+                lines.append(f"size = {int(artifact['size'])}")
+            if artifact.get("metadata_sha256"):
+                lines.append(
+                    f"metadata_sha256 = {_quoted(artifact['metadata_sha256'])}"
+                )
     return "\n".join(lines) + "\n"
 
 

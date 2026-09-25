@@ -21,8 +21,9 @@ classifiers = [
   "Programming Language :: Python :: 3 :: Only",
 ]
 dependencies = [
-  "packaging>=23.2,<26",
+  "packaging>=23.2,<27",
   "rich>=13.7,<15",
+  "resolvelib>=1.1,<1.2",
   "tomli>=2; python_version < '3.11'",
 ]
 

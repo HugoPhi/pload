@@ -456,8 +456,8 @@ def print_declarative_plan(plan):
     console = Console(highlight=False)
     if plan["lock"]["required"]:
         console.print(
-            f"[bold yellow]Lock: {plan['lock']['status']}[/] · plan is read-only; "
-            "run [bold green]pload lock[/] to resolve dependencies"
+            f"[bold yellow]Lock: {plan['lock']['status']}[/] · metadata was unavailable "
+            "offline; run [bold green]pload plan[/] with network access"
         )
     python = plan["python"]
     console.print(Panel.fit(

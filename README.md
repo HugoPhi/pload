@@ -97,7 +97,11 @@ written by the user; transitive dependencies are routed automatically. It
 supports previous/next, undo, reset, save and save-and-apply through a
 compact shortcut row (`p/n/u/r/s/a/q`); the selection list itself contains only
 real package sources. `apply` executes exactly the saved plan:
-it never re-resolves, changes route, falls back, or uploads packages.
+it never re-resolves, changes route, falls back, or uploads packages. Set
+`[plan].mode = "auto"` in `pload.toml` to save recommended routes without the
+chooser; strict per-package exceptions live under `[plan.packages.NAME]`.
+`apply` prints the saved plan first, then package headings, exact source
+URLs/paths and real download byte progress.
 
 Back up a special or slow wheel only when you explicitly request it:
 

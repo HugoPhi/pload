@@ -60,8 +60,8 @@ $ pload apply pload.toml
 
 `pload.toml` describes user intent. `plan` resolves from independent metadata
 when its managed lock is stale, then inventories resources without downloading
-wheel bodies. Analysis does not overwrite saved choices; Save, Apply, or
-`--no-ui` writes the plan. `apply` executes only that saved plan and never
+wheel bodies. Analysis does not overwrite saved choices; Save, Apply,
+`--no-ui`, or `[plan].mode = "auto"` writes the plan. `apply` executes only that saved plan and never
 changes route or uploads.
 """,
     ("new",): r"""
@@ -390,13 +390,25 @@ adjacent artifacts and content-addressed repositories. It never downloads a
 wheel body. A current lock skips metadata resolution. Cache roots are indexed
 once and only matching-Python environments are inspected. The chooser reports
 measured local read throughput and network/repository RTT instead of fixed time
-guesses. Analysis does not overwrite `.pload_plan.toml`; Save, Apply, and
-`--no-ui` persist choices, while quit and `--json` do not.
+guesses. Analysis does not overwrite `.pload_plan.toml`; Save, Apply,
+`--no-ui`, and `[plan].mode = "auto"` persist choices, while quit and `--json`
+do not.
 
 The chooser shows only requirements written in `pload.toml` and
 automatically assigns routes to their transitive dependencies. It supports
 previous/next, undo, reset, save, and save-and-apply; `--no-ui` selects the
 lowest-cost measured routes for automation.
+
+For configuration-driven automation, add:
+
+```toml
+[plan]
+mode = "auto"
+```
+
+This saves recommended routes without opening the chooser. Strict exceptions
+can be declared under `[plan.packages.NAME]` with `method` and optional
+`location`; an unavailable override fails planning instead of falling back.
 """
 GUIDES[("lock",)] = r"""
 # Resolve the user declaration into an exact managed lock
@@ -421,8 +433,11 @@ pload apply --offline
 ```
 
 Apply requires a current `.pload_lock.toml` and `.pload_plan.toml`, then installs
-Python when needed, executes each selected route, verifies hashes, creates the
-environment, installs packages and runs `pip check`. It never resolves, tries an
+Python when needed. Before changing anything it prints the complete saved plan.
+Execution then prints each `NAME==VERSION` as a heading, its selected source
+URL/path/repository, real network byte progress, and the later install and
+verification stages. It executes each selected route, verifies hashes, creates
+the environment, installs packages and runs `pip check`. It never resolves, tries an
 alternative route, or uploads package bytes. A selected `index-exact` route
 downloads from the locked URL even if the same wheel is already cached; the
 verified wheel is then installed locally with package networking disabled.

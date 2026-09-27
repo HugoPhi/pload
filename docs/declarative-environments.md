@@ -25,8 +25,9 @@ pload plan pload.toml       # resolve metadata, inventory and choose routes
 pload apply pload.toml      # execute only the saved plan
 ```
 
-In a terminal, `plan` opens a route chooser for only the direct requirements
-the user wrote in `pload.toml`. Transitive dependencies remain exact and
+By default, `plan` opens a route chooser for only the direct requirements the
+user wrote in `pload.toml`. Set `[plan].mode = "auto"` to save the recommended
+routes without opening the chooser. Transitive dependencies remain exact and
 auditable, but pload automatically assigns their lowest-cost valid routes from
 the measured data available. Arrow keys and Enter select a real route; `n`
 moves forward, `p` goes back, `u` undoes, `r` restores the recommended choices,
@@ -75,6 +76,13 @@ network = "allow"
 source_build = "forbid"
 publish_missing_artifacts = false
 repositories = ["lab"]
+
+[plan]
+mode = "auto"
+
+[plan.packages.torch]
+method = "repository"
+location = "lab"
 
 [sources.pypi]
 kind = "index"
@@ -126,6 +134,19 @@ reused exactly, which avoids repeatedly downloading large special builds.
 | `source_build` | `"fallback"` | In compatible mode, `forbid` disallows source distributions. Exact wheel routes never build source. |
 | `publish_missing_artifacts` | `false` recommended | Retained for schema-1 compatibility but ignored by `apply`. Upload is always explicit through `pload remote add`. |
 | `repositories` | `[]` | Repositories to search while planning. Every name must have a matching repository table. This never authorizes upload. |
+
+### `[plan]` and `[plan.packages.NAME]`
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `mode` | `"interactive"` | `interactive` opens the route chooser; `auto` immediately saves the recommended measured routes. |
+| `plan.packages.NAME.method` | optional | Require one acquisition method for a special package, such as `repository`, `index-exact`, `cache`, or `environment-copy`. |
+| `plan.packages.NAME.location` | optional | Further require a specific source, repository, environment, or path. |
+
+Most configurations only need `mode = "auto"`. Package overrides are strict:
+if the requested route is not currently available, planning reports the package
+as unavailable instead of silently choosing another route. Overrides are also
+checked again by `apply`, so editing the managed plan cannot bypass them.
 
 ### `[sources.NAME]`
 
@@ -248,8 +269,14 @@ With a current lock, planning only inventories possible routes. It indexes each
 external cache once, inspects only matching-Python environments and only the
 locked package names, checks configured repositories, and measures endpoint
 RTT. The analysis API does not create or overwrite `.pload_plan.toml`.
-Interactive Save/Apply and `--no-ui` persist choices; quitting or `--json` does
-not.
+Interactive Save/Apply, `--no-ui`, and `[plan].mode = "auto"` persist choices;
+quitting or `--json` does not.
+
+`pload apply` first prints the complete persisted plan table. It then prints a
+heading for each exact package, the selected source URL/path/repository, real
+download byte progress for network artifacts, environment creation and
+verification stages. This makes the saved decision and its execution visible in
+one command without allowing apply to recalculate the plan.
 
 An unpinned configuration with a missing or stale lock has one additional job:
 it must determine exact versions and the transitive graph before routes have a

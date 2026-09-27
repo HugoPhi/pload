@@ -485,7 +485,8 @@ def print_declarative_plan(plan):
     python = plan["python"]
     ui.heading(
         f"Plan · {plan['name']}",
-        f"Python {python['method']} · {python['status']}",
+        f"Python {python['method']} · {python['status']} · "
+        f"{plan.get('planning_mode', 'interactive')} planning",
         output=console,
     )
     console.print(f"[dim]{python['location']}[/]", overflow="ellipsis", no_wrap=True)
@@ -528,6 +529,32 @@ def print_declarative_plan(plan):
         )
     else:
         console.print("[dim]Acquisition choices were not saved.[/]")
+
+
+def print_apply_progress(message, output=None):
+    """Render durable, package-oriented apply output instead of one opaque spinner."""
+    console = output or ui.console()
+    kind, _, detail = str(message).partition(" ")
+    if kind == "PACKAGE":
+        counter, _, package = detail.partition(" ")
+        console.print()
+        line = Text("▶ ", style="bold cyan")
+        line.append(package, style="bold white")
+        line.append(f"  {counter}", style="dim")
+        console.print(line)
+    elif kind == "SOURCE":
+        line = Text("  ↳ ", style="green")
+        line.append(detail, style="white")
+        console.print(line)
+    elif kind == "DOWNLOAD":
+        console.print(Text(f"    downloaded {detail}", style="cyan"))
+    elif kind == "STAGE":
+        console.print()
+        console.print(Text(f"▶ {detail}", style="bold cyan"))
+    elif kind == "DONE":
+        ui.success(detail, output=console)
+    else:
+        console.print(message)
 
 
 def choose_declarative_routes(plan):
@@ -941,25 +968,29 @@ def run(argv=None):
                     )
                 action = "save"
                 chooser_console = ui.console()
-                if chooser_console.is_terminal and not args.no_ui:
+                if (chooser_console.is_terminal and not args.no_ui
+                        and plan.get("planning_mode") != "auto"):
                     action = choose_declarative_routes(plan)
                 if action != "quit":
                     plan["plan_path"] = str(manager.save_plan(args.file, plan))
                     plan["saved"] = True
                 print_declarative_plan(plan)
                 if action == "apply":
-                    with ui.status("Applying the saved acquisition plan…") as update_status:
-                        restored = manager.apply(
-                            args.file, offline=args.offline,
-                            progress=update_status,
-                        )
+                    restored = manager.apply(
+                        args.file, offline=args.offline,
+                        progress=lambda message: print_apply_progress(
+                            message, chooser_console
+                        ),
+                    )
                     chooser_console.print(restored)
         else:
-            with ui.status("Applying the saved acquisition plan…") as update_status:
-                restored = manager.apply(
-                    args.file, args.name, args.offline,
-                    progress=update_status,
-                )
+            apply_console = ui.console()
+            saved_plan = manager.saved_plan(args.file)
+            print_declarative_plan(saved_plan)
+            restored = manager.apply(
+                args.file, args.name, args.offline,
+                progress=lambda message: print_apply_progress(message, apply_console),
+            )
             print(restored)
         return 0
 

@@ -1,5 +1,7 @@
 import pytest
 
+import pload.cli as cli_module
+import pload.declarative as declarative_module
 from pload.cli import build_parser, main, shell_script
 
 
@@ -230,6 +232,39 @@ def test_no_arguments_show_welcome_and_simple_usage(capsys):
     assert "pload new -n data -v 3.12" in output
     assert "pload -h -d" in output
     assert output.index("Simple usage") < output.index("Global options")
+
+
+def test_apply_prints_saved_plan_before_package_progress(tmp_path, monkeypatch, capsys):
+    events = []
+
+    class FakeManager:
+        def __init__(self, config):
+            pass
+
+        def saved_plan(self, path):
+            events.append("loaded")
+            return {"name": "demo"}
+
+        def apply(self, path, name, offline, progress):
+            events.append("apply")
+            progress("PACKAGE 1/1 numpy==2.0.2")
+            progress("SOURCE downloading from https://files.invalid/numpy.whl")
+            progress("DOWNLOAD 8.0 MiB / 16.0 MiB")
+            return tmp_path / "demo"
+
+    monkeypatch.setattr(declarative_module, "DeclarativeEnvironmentManager", FakeManager)
+    monkeypatch.setattr(
+        cli_module, "print_declarative_plan",
+        lambda plan: events.append("printed-plan"),
+    )
+
+    assert main(["apply", str(tmp_path / "pload.toml")]) == 0
+
+    assert events == ["loaded", "printed-plan", "apply"]
+    output = capsys.readouterr().out
+    assert "numpy==2.0.2" in output
+    assert "downloading from https://files.invalid/numpy.whl" in output
+    assert "downloaded 8.0 MiB / 16.0 MiB" in output
 
 
 def test_new_without_options_uses_guided_creation(tmp_path, monkeypatch):

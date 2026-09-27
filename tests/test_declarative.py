@@ -98,6 +98,33 @@ def test_manifest_roundtrip(tmp_path):
     assert locked["package"] == data["package"]
 
 
+def test_manifest_roundtrip_with_automatic_plan_and_package_override(tmp_path):
+    data = simple_manifest()
+    data["plan"] = {
+        "mode": "auto",
+        "packages": {
+            "numpy": {"method": "index-exact", "location": "default"},
+        },
+    }
+    path = tmp_path / "pload.toml"
+    write_configuration(path, data)
+
+    _, loaded = load_manifest(path)
+
+    assert loaded["plan"] == data["plan"]
+
+
+def test_manifest_rejects_invalid_planning_mode_and_route():
+    data = simple_manifest()
+    data["plan"] = {"mode": "always-guess"}
+    with pytest.raises(PloadError, match="plan.mode"):
+        validate_manifest(data)
+
+    data["plan"] = {"mode": "auto", "packages": {"demo": {"method": "magic"}}}
+    with pytest.raises(PloadError, match="plan.packages.demo.method"):
+        validate_manifest(data)
+
+
 def test_lock_migrates_legacy_embedded_lock_without_resolving(tmp_path, monkeypatch):
     data = simple_manifest("exact")
     path = tmp_path / "pload.toml"
@@ -203,6 +230,56 @@ def test_plan_uses_measurements_instead_of_fixed_fake_times(tmp_path, monkeypatc
 
     assert route["measurement"] == "RTT 123 ms"
     assert "estimated_seconds" not in route
+
+
+def test_automatic_plan_honors_package_route_override(tmp_path):
+    config = ConfigManager(home=tmp_path / "home")
+    config.get_python_path = lambda version=None: Path(sys.executable)
+    wheel = tiny_wheel(tmp_path / "fixture")
+    data = simple_manifest("exact")
+    data["environment"].update({
+        "python": platform.python_version(),
+        "implementation": sys.implementation.name,
+        "system": platform.system(),
+        "machine": platform.machine(),
+    })
+    data["package"][0]["artifact"] = [{
+        "filename": wheel.name, "sha256": digest(wheel),
+        "tags": ["py3-none-any"], "repositories": [],
+        "url": "https://files.invalid/" + wheel.name,
+    }]
+    data["plan"] = {
+        "mode": "auto",
+        "packages": {"demo": {"method": "index-exact", "location": "default"}},
+    }
+    manifest = tmp_path / "pload.toml"
+    write_configuration(manifest, data)
+    manager = DeclarativeEnvironmentManager(config)
+    manager.cache.mkdir(parents=True)
+    shutil.copyfile(wheel, manager.cache / wheel.name)
+
+    result = manager.plan(manifest)
+
+    assert result["planning_mode"] == "auto"
+    assert result["packages"][0]["selected"]["method"] == "index-exact"
+    assert result["packages"][0]["alternatives"] == []
+
+
+def test_configured_route_must_exist_in_automatic_plan(tmp_path):
+    data = simple_manifest()
+    data["plan"] = {
+        "mode": "auto",
+        "packages": {"demo": {"method": "repository", "location": "missing"}},
+    }
+    path = tmp_path / "pload.toml"
+    write_configuration(path, data)
+
+    package = DeclarativeEnvironmentManager(
+        ConfigManager(home=tmp_path / "home")
+    ).plan(path)["packages"][0]
+
+    assert package["selected"] is None
+    assert package["rejections"][0]["reason"].endswith("repository:missing")
 
 
 def test_changed_python_rejects_incompatible_cached_wheel_before_apply(tmp_path, monkeypatch):
@@ -610,8 +687,8 @@ def test_describe_plan_apply_through_content_repository(tmp_path, monkeypatch):
     assert output == "42"
     assert target.apply(manifest) == restored
     assert digest(target.cache / artifact["filename"]) == artifact["sha256"]
-    assert any("Preparing pload-demo==1.0" in item for item in apply_progress)
-    assert any("Verified exact requirements" in item for item in apply_progress)
+    assert any("PACKAGE 1/1 pload-demo==1.0" in item for item in apply_progress)
+    assert any("DONE verified exact requirements" in item for item in apply_progress)
 
 
 def test_apply_rolls_back_a_new_environment_after_install_failure(tmp_path):
@@ -776,7 +853,11 @@ def test_apply_downloads_the_exact_url_saved_by_plan(tmp_path, monkeypatch):
     progress = []
     restored = manager.apply(manifest, progress=progress.append)
     assert requested == [artifact_url]
-    assert any("Downloading pload-demo==1.0" in item for item in progress)
+    assert any(item == "PACKAGE 1/1 pload-demo==1.0" for item in progress)
+    assert any(
+        item.startswith(f"SOURCE downloading from {artifact_url}") for item in progress
+    )
+    assert any(item.startswith("DOWNLOAD ") for item in progress)
     assert execute([
         config.get_pip_command(restored)[0], "-c",
         "import pload_demo; print(pload_demo.answer)",

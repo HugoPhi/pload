@@ -160,6 +160,14 @@ def dump_manifest(data):
     repositories = policy.get("repositories", [])
     if repositories:
         lines.append(f"repositories = {_array(repositories)}")
+    planning = data.get("plan")
+    if planning:
+        lines += ["", "[plan]", f"mode = {_quoted(planning.get('mode', 'interactive'))}"]
+        for package_name, route in sorted(planning.get("packages", {}).items()):
+            lines += ["", f"[plan.packages.{_quoted(package_name)}]"]
+            lines.append(f"method = {_quoted(route['method'])}")
+            if route.get("location"):
+                lines.append(f"location = {_quoted(route['location'])}")
     capabilities = data.get("capabilities", {})
     if capabilities:
         lines += ["", "[capabilities]"]
@@ -307,6 +315,30 @@ def validate_manifest(data):
         raise PloadError("policy.source_build must be fallback or forbid")
     if not isinstance(policy.get("publish_missing_artifacts", False), bool):
         raise PloadError("policy.publish_missing_artifacts must be true or false")
+    planning = data.get("plan", {})
+    if not isinstance(planning, dict):
+        raise PloadError("plan must be a table")
+    if planning.get("mode", "interactive") not in {"interactive", "auto"}:
+        raise PloadError("plan.mode must be interactive or auto")
+    package_routes = planning.get("packages", {})
+    if not isinstance(package_routes, dict):
+        raise PloadError("plan.packages must be a table")
+    route_methods = {
+        "cache", "configuration-artifact", "external-cache", "environment-copy",
+        "repository", "index-exact", "index-resolve",
+    }
+    normalized_routes = set()
+    for package_name, route in package_routes.items():
+        if not isinstance(package_name, str) or not package_name:
+            raise PloadError("plan.packages keys must be package names")
+        normalized = normalized_name(package_name)
+        if normalized in normalized_routes:
+            raise PloadError(f"duplicate plan override for package {package_name}")
+        normalized_routes.add(normalized)
+        if not isinstance(route, dict) or route.get("method") not in route_methods:
+            raise PloadError(f"plan.packages.{package_name}.method is invalid")
+        if route.get("location") is not None and not isinstance(route["location"], str):
+            raise PloadError(f"plan.packages.{package_name}.location must be a string")
     policy_repositories = policy.get("repositories", [])
     if (not isinstance(policy_repositories, list)
             or any(not isinstance(name, str) for name in policy_repositories)):
@@ -1105,6 +1137,12 @@ class DeclarativeEnvironmentManager:
 
     def plan(self, manifest_path, offline=False, progress=None):
         path, data, current, legacy = self._load_state(manifest_path)
+        planning = data.get("plan", {})
+        planning_mode = planning.get("mode", "interactive")
+        route_overrides = {
+            normalized_name(name): route
+            for name, route in planning.get("packages", {}).items()
+        }
         dependencies = data["environment"].get("dependencies", [])
         direct_names = {
             normalized_name(_parse_dependency(value).name) for value in dependencies
@@ -1175,6 +1213,7 @@ class DeclarativeEnvironmentManager:
                 result = {
                     "path": str(path), "name": data["name"], "python": python_action,
                     "packages": pending, "ready": False, "lock": lock,
+                    "planning_mode": planning_mode,
                 }
                 result["plan_path"] = str(plan_path(path))
                 result["saved"] = False
@@ -1346,6 +1385,25 @@ class DeclarativeEnvironmentManager:
                     measurement=network_measurement(data["sources"][source_name]["url"]),
                 ))
             candidates.sort(key=lambda item: item["cost"])
+            override = route_overrides.get(normalized_name(package["name"]))
+            if override:
+                matching = [
+                    candidate for candidate in candidates
+                    if candidate["method"] == override["method"]
+                    and (not override.get("location")
+                         or candidate["location"] == override["location"])
+                ]
+                if matching:
+                    candidates = matching
+                else:
+                    requested = override["method"]
+                    if override.get("location"):
+                        requested += ":" + override["location"]
+                    rejections.insert(0, {
+                        "artifact": package["name"],
+                        "reason": f"configured plan route is unavailable: {requested}",
+                    })
+                    candidates = []
             plans.append({
                 "name": package["name"], "version": package["version"],
                 "direct": normalized_name(package["name"]) in direct_names,
@@ -1356,7 +1414,8 @@ class DeclarativeEnvironmentManager:
         ready = (not lock_required and python_action["status"] != "unavailable"
                  and all(item["selected"] for item in plans))
         result = {"path": str(path), "name": data["name"], "python": python_action,
-                  "packages": plans, "ready": ready, "lock": lock}
+                  "packages": plans, "ready": ready, "lock": lock,
+                  "planning_mode": planning_mode}
         result["plan_path"] = str(plan_path(path))
         result["saved"] = False
         return result
@@ -1386,7 +1445,12 @@ class DeclarativeEnvironmentManager:
                            "sources": ["default"], "artifact": []})
         return result
 
-    def apply(self, manifest_path, name=None, offline=False, progress=None):
+    def saved_plan(self, manifest_path):
+        """Return the exact persisted plan in the same shape used by the plan UI."""
+        _, _, plan = self._load_saved_execution_plan(manifest_path)
+        return plan
+
+    def _load_saved_execution_plan(self, manifest_path):
         path, data, current, _ = self._load_state(manifest_path)
         if data["environment"].get("dependencies") and not current:
             raise PloadError(
@@ -1401,6 +1465,9 @@ class DeclarativeEnvironmentManager:
         plan = {
             "path": str(path), "name": saved["name"], "ready": saved["ready"],
             "python": saved["python"], "packages": [],
+            "lock": {"status": "current", "required": False, "path": str(lock_file)},
+            "plan_path": str(plan_path(path)), "saved": True,
+            "planning_mode": data.get("plan", {}).get("mode", "interactive"),
         }
         for package in saved.get("package", []):
             selected = None
@@ -1408,14 +1475,16 @@ class DeclarativeEnvironmentManager:
                 selected = {
                     "method": package["method"], "location": package["location"],
                     "status": package["status"],
-                    "estimated_seconds": package.get("estimated_seconds", 0.0),
                 }
+                if package.get("measurement"):
+                    selected["measurement"] = package["measurement"]
                 if package.get("fingerprint"):
                     selected["fingerprint"] = package["fingerprint"]
                 if package.get("artifact"):
                     selected["artifact"] = package["artifact"]
             plan["packages"].append({
                 "name": package["name"], "version": package["version"],
+                "direct": package.get("direct", True),
                 "selected": selected, "alternatives": [],
                 "rejections": ([{"reason": package["reason"]}]
                                if package.get("reason") else []),
@@ -1429,6 +1498,10 @@ class DeclarativeEnvironmentManager:
                     label += f" ({item['rejections'][0]['reason']})"
                 details.append(label)
             raise PloadError("no valid reproduction route for: " + ", ".join(details))
+        return path, data, plan
+
+    def apply(self, manifest_path, name=None, offline=False, progress=None):
+        path, data, plan = self._load_saved_execution_plan(manifest_path)
         python_method = plan["python"].get("method")
         if offline and python_method == "install-python":
             raise PloadError("offline apply forbids the selected Python network route")
@@ -1465,12 +1538,12 @@ class DeclarativeEnvironmentManager:
         with tempfile.TemporaryDirectory(prefix="pload-apply-") as temporary:
             stage = Path(temporary)
             for index_number, package_plan in enumerate(plan["packages"], 1):
+                selected = package_plan["selected"]
                 if progress:
                     progress(
-                        f"[{index_number}/{len(plan['packages'])}] Preparing "
+                        f"PACKAGE {index_number}/{len(plan['packages'])} "
                         f"{package_plan['name']}=={package_plan['version']}"
                     )
-                selected = package_plan["selected"]
                 if offline and selected["method"] in {"index-exact", "index-resolve"}:
                     raise PloadError(
                         f"offline apply forbids the selected network route for "
@@ -1484,10 +1557,7 @@ class DeclarativeEnvironmentManager:
                     if method == "cache":
                         source = Path(selected["location"])
                         if progress:
-                            progress(
-                                f"[{index_number}/{len(plan['packages'])}] "
-                                f"Using selected cache for {label}"
-                            )
+                            progress(f"SOURCE using cache {source}")
                         if not source.is_file() or digest(source) != artifact["sha256"]:
                             raise PloadError(
                                 f"planned route failed for {label} (cache): "
@@ -1496,18 +1566,24 @@ class DeclarativeEnvironmentManager:
                             )
                         install_artifact = source
                     else:
-                        action = {
-                            "index-exact": "Downloading",
-                            "repository": "Fetching",
-                            "configuration-artifact": "Copying",
-                            "external-cache": "Copying",
-                        }.get(method, "Acquiring")
                         size = artifact.get("size")
                         size_note = f" ({_human_size(size)})" if size else ""
+                        if method == "index-exact":
+                            source_description = artifact.get("url") or data[
+                                "sources"
+                            ][selected["location"]]["url"]
+                            action = "downloading from"
+                        elif method == "repository":
+                            source_description = data["repositories"][
+                                selected["location"]
+                            ]["location"]
+                            action = "fetching from repository"
+                        else:
+                            source_description = selected["location"]
+                            action = "copying from"
                         if progress:
                             progress(
-                                f"[{index_number}/{len(plan['packages'])}] {action} "
-                                f"{label} via {method}:{selected['location']}{size_note}"
+                                f"SOURCE {action} {source_description}{size_note}"
                             )
                         acquired_dir = stage / f"artifact-{index_number}"
                         acquired_dir.mkdir()
@@ -1535,12 +1611,23 @@ class DeclarativeEnvironmentManager:
                     )
                 else:
                     if selected["method"] == "environment-copy":
+                        if progress:
+                            progress(
+                                f"SOURCE copying installed package from "
+                                f"{selected['location']}"
+                            )
                         environment_copies.append(package_plan)
                     else:
+                        source = data.get("sources", {}).get(selected["location"], {})
+                        if progress:
+                            progress(
+                                f"SOURCE downloading from "
+                                f"{source.get('url', selected['location'])}"
+                            )
                         compatible.append(package_plan)
             venvs = VenvManager(self.config)
             if progress:
-                progress(f"Creating environment {target_name}")
+                progress(f"STAGE creating environment {target_name}")
             env = venvs.create_venv(
                 version=str(interpreter), name=target_name,
                 description=f"Applied from {path.name}",
@@ -1548,6 +1635,8 @@ class DeclarativeEnvironmentManager:
             try:
                 pip = self.config.get_pip_command(env)
                 if artifacts:
+                    if progress:
+                        progress("STAGE installing verified wheel artifacts")
                     execute(pip + ["install", "--no-index", "--no-deps"] + artifacts,
                             capture=False)
                 for package_plan in environment_copies:
@@ -1574,7 +1663,7 @@ class DeclarativeEnvironmentManager:
                                str(requirements)])
                 execute(pip + ["check"], capture=False)
                 if progress:
-                    progress("Verified exact requirements and dependency consistency")
+                    progress("DONE verified exact requirements and dependency consistency")
                 (env / ".pload-manifest.sha256").write_text(
                     expected_state + "\n", encoding="utf-8"
                 )
@@ -1649,6 +1738,19 @@ class DeclarativeEnvironmentManager:
             if package.get("status") != expected_status:
                 raise PloadError(
                     f"route status does not match method {method} for "
+                    f"{package.get('name')}=={package.get('version')}"
+                )
+            configured_route = next((
+                route for name, route in data.get("plan", {}).get("packages", {}).items()
+                if normalized_name(name) == key[0]
+            ), None)
+            if configured_route and (
+                method != configured_route["method"]
+                or (configured_route.get("location")
+                    and package.get("location") != configured_route["location"])
+            ):
+                raise PloadError(
+                    f"saved route does not match the configured plan override for "
                     f"{package.get('name')}=={package.get('version')}"
                 )
             artifact = package.get("artifact")
@@ -1777,19 +1879,28 @@ with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as bundle:
                     )
                     with urlopen(request, timeout=60) as response, temporary.open("wb") as output:
                         received = 0
-                        expected = artifact.get("size")
+                        response_headers = getattr(response, "headers", {})
+                        expected = artifact.get("size") or response_headers.get(
+                            "Content-Length"
+                        )
+                        expected = int(expected) if expected else None
+                        last_reported = 0
                         while True:
                             chunk = response.read(1024 * 1024)
                             if not chunk:
                                 break
                             output.write(chunk)
                             received += len(chunk)
-                            if progress:
+                            if progress and (
+                                received - last_reported >= 8 * 1024 * 1024
+                                or (expected and received >= expected)
+                            ):
                                 total = f" / {_human_size(expected)}" if expected else ""
-                                progress(
-                                    f"Downloading {package['name']}=={package['version']}: "
-                                    f"{_human_size(received)}{total}"
-                                )
+                                progress(f"DOWNLOAD {_human_size(received)}{total}")
+                                last_reported = received
+                        if progress and received != last_reported:
+                            total = f" / {_human_size(expected)}" if expected else ""
+                            progress(f"DOWNLOAD {_human_size(received)}{total}")
                 except OSError as exc:
                     raise PloadError(f"cannot download planned artifact: {exc}") from exc
                 if digest(temporary) != artifact["sha256"]:

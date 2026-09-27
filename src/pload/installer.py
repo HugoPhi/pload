@@ -292,14 +292,14 @@ def review_settings(args):
             for key in labels
         ]
         choices.extend([
-            Choice("✓ Save configuration", value="__save__"),
-            Choice("× Cancel", value="__cancel__"),
+            Choice(f"{ui.glyph('✓', '[ok]')} Save configuration", value="__save__"),
+            Choice(f"{ui.glyph('×', 'x')} Cancel", value="__cancel__"),
         ])
         field = ui.select(
             "Review setup",
             choices,
             default="__save__",
-            instruction="↑/↓ move • enter edit",
+            instruction=ui.navigation_hint("edit"),
         )
         if field == "__save__":
             break

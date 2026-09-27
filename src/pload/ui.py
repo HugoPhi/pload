@@ -56,6 +56,20 @@ def _color_system():
     return None if os.environ.get("NO_COLOR") is not None else "auto"
 
 
+def glyph(value, fallback, *, encoding=None):
+    """Use Unicode only when the active terminal can actually encode it."""
+    encoding = encoding or getattr(sys.stdout, "encoding", None) or "utf-8"
+    try:
+        value.encode(encoding)
+    except (LookupError, UnicodeEncodeError):
+        return fallback
+    return value
+
+
+def navigation_hint(action="select"):
+    return f"{glyph('↑/↓', 'up/down')} move • enter {action}"
+
+
 class ArgumentParser(argparse.ArgumentParser):
     """Argparse with the same compact error language as the rest of pload."""
 
@@ -126,7 +140,8 @@ def logo(*, output=None):
 
 def success(message, *, detail=None, output=None):
     output = output or console()
-    output.print(Text.assemble(("✓ ", "bold green"), (message, "white")))
+    mark = glyph("✓ ", "[ok] ", encoding=output.encoding)
+    output.print(Text.assemble((mark, "bold green"), (message, "white")))
     if detail:
         output.print(f"  [dim]{detail}[/]")
 
@@ -158,19 +173,20 @@ def status(message):
         yield lambda value: None
 
 
-def select(message, choices, *, default=None, instruction="↑/↓ move • enter select"):
+def select(message, choices, *, default=None, instruction=None):
     """Choose with normal cursor keys, with a numbered fallback for tests/pipes."""
     normalized = [
         item if isinstance(item, questionary.Choice) else questionary.Choice(str(item), value=item)
         for item in choices
     ]
     if is_interactive():
+        instruction = instruction or navigation_hint()
         return questionary.select(
             message,
             choices=normalized,
             default=default,
             instruction=instruction,
-            pointer="❯",
+            pointer=glyph("❯", ">"),
             qmark="?",
             style=_prompt_style(),
             use_shortcuts=False,

@@ -75,3 +75,9 @@ def test_no_color_disables_rich_ansi_sequences(monkeypatch):
 
     assert output.color_system is None
     assert ui._prompt_style() is ui.PLAIN_PROMPT_STYLE
+
+
+def test_symbols_fall_back_for_legacy_windows_encodings():
+    assert ui.glyph("✓", "[ok]", encoding="cp1252") == "[ok]"
+    assert ui.glyph("❯", ">", encoding="cp1252") == ">"
+    assert ui.glyph("✓", "[ok]", encoding="utf-8") == "✓"

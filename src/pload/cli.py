@@ -553,15 +553,21 @@ def choose_declarative_routes(plan):
                 value=("route", index - 1),
             ))
         if cursor:
-            choices.append(Choice("← Previous package", value=("previous", None)))
+            choices.append(Choice(
+                f"{ui.glyph('←', '<-')} Previous package",
+                value=("previous", None),
+            ))
         if cursor < len(decision_indices) - 1:
-            choices.append(Choice("→ Keep current choice and continue", value=("next", None)))
+            choices.append(Choice(
+                f"{ui.glyph('→', '->')} Keep current choice and continue",
+                value=("next", None),
+            ))
         choices.extend([
-            Choice("↶ Undo last change", value=("undo", None)),
-            Choice("↺ Reset all to recommended", value=("reset", None)),
-            Choice("✓ Save plan", value=("save", None)),
-            Choice("▶ Save and apply", value=("apply", None)),
-            Choice("× Cancel", value=("quit", None)),
+            Choice(f"{ui.glyph('↶', '<-')} Undo last change", value=("undo", None)),
+            Choice(f"{ui.glyph('↺', 'R')} Reset all to recommended", value=("reset", None)),
+            Choice(f"{ui.glyph('✓', '[ok]')} Save plan", value=("save", None)),
+            Choice(f"{ui.glyph('▶', '>')} Save and apply", value=("apply", None)),
+            Choice(f"{ui.glyph('×', 'x')} Cancel", value=("quit", None)),
         ])
         command, value = ui.select(
             "Select an acquisition source",

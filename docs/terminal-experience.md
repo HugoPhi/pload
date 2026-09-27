@@ -10,6 +10,9 @@ behaviour, not decoration.
   screen interface unexpectedly.
 - A command that needs a choice uses `↑`/`↓` and Enter. The active row is
   prefixed with `❯`; the recommended value is selected initially.
+- Package planning keeps navigation commands out of the source list. Use the
+  visible first-letter shortcuts: `p` previous, `n` next, `u` undo, `r` reset,
+  `s` save, `a` apply, and `q` quit.
 - `pload new` is guided when no creation options are supplied. Every guided
   operation also has flags for scripts and automation.
 - Destructive actions use a conventional `y/N` confirmation. `--yes` is the

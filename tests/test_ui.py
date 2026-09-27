@@ -18,6 +18,19 @@ def test_select_has_numbered_fallback_when_terminal_ui_is_unavailable(monkeypatc
     assert "1) Local cache (default)" in capsys.readouterr().out
 
 
+def test_select_fallback_accepts_action_hotkeys(monkeypatch):
+    monkeypatch.setattr(ui, "is_interactive", lambda: False)
+    monkeypatch.setattr("builtins.input", lambda prompt: "p")
+
+    selected = ui.select(
+        "Choose a source",
+        [Choice("Local cache", value="cache")],
+        hotkeys={"p": ("previous", None)},
+    )
+
+    assert selected == ("previous", None)
+
+
 def test_route_chooser_only_visits_direct_packages_and_supports_backtracking(monkeypatch):
     plan = {
         "python": {"status": "available"},
@@ -67,6 +80,8 @@ def test_route_chooser_only_visits_direct_packages_and_supports_backtracking(mon
     assert plan["packages"][1]["selected"]["method"] == "cache"
     assert len(prompts) == 2
     assert all("typing-extensions" not in message for message, _ in prompts)
+    displayed = [choice.title for _, choices in prompts for choice in choices]
+    assert all("Previous" not in title and "Save" not in title for title in displayed)
 
 
 def test_no_color_disables_rich_ansi_sequences(monkeypatch):

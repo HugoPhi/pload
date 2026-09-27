@@ -95,7 +95,8 @@ bodies—and inventories pload/pip/uv caches, compatible existing environments,
 local/SSH stores and indexes. Its interactive chooser shows only dependencies
 written by the user; transitive dependencies are routed automatically. It
 supports previous/next, undo, reset, save and save-and-apply through a
-cursor-key menu. `apply` executes exactly the saved plan:
+compact shortcut row (`p/n/u/r/s/a/q`); the selection list itself contains only
+real package sources. `apply` executes exactly the saved plan:
 it never re-resolves, changes route, falls back, or uploads packages.
 
 Back up a special or slow wheel only when you explicitly request it:

@@ -552,27 +552,28 @@ def choose_declarative_routes(plan):
                 f"{route['method']:<18} ~{seconds:g}s  {route['location']}{recommended}",
                 value=("route", index - 1),
             ))
-        if cursor:
-            choices.append(Choice(
-                f"{ui.glyph('←', '<-')} Previous package",
-                value=("previous", None),
-            ))
-        if cursor < len(decision_indices) - 1:
-            choices.append(Choice(
-                f"{ui.glyph('→', '->')} Keep current choice and continue",
-                value=("next", None),
-            ))
-        choices.extend([
-            Choice(f"{ui.glyph('↶', '<-')} Undo last change", value=("undo", None)),
-            Choice(f"{ui.glyph('↺', 'R')} Reset all to recommended", value=("reset", None)),
-            Choice(f"{ui.glyph('✓', '[ok]')} Save plan", value=("save", None)),
-            Choice(f"{ui.glyph('▶', '>')} Save and apply", value=("apply", None)),
-            Choice(f"{ui.glyph('×', 'x')} Cancel", value=("quit", None)),
-        ])
+        if not choices:
+            ui.warning(f"No valid source is available for {package['name']}")
+            return "quit"
+        actions = {
+            "p": ("previous", None),
+            "n": ("next", None),
+            "u": ("undo", None),
+            "r": ("reset", None),
+            "s": ("save", None),
+            "a": ("apply", None),
+            "q": ("quit", None),
+        }
+        console.print(
+            "[dim]p previous · n next · u undo · r reset · "
+            "s save · a apply · q quit[/]"
+        )
         command, value = ui.select(
             "Select an acquisition source",
             choices,
             default=("route", 0) if routes else ("quit", None),
+            instruction=ui.navigation_hint("choose"),
+            hotkeys=actions,
         )
         if command == "route":
             selection.select(package_index, value)

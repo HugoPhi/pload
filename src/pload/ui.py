@@ -173,15 +173,16 @@ def status(message):
         yield lambda value: None
 
 
-def select(message, choices, *, default=None, instruction=None):
+def select(message, choices, *, default=None, instruction=None, hotkeys=None):
     """Choose with normal cursor keys, with a numbered fallback for tests/pipes."""
+    hotkeys = {str(key).lower(): value for key, value in (hotkeys or {}).items()}
     normalized = [
         item if isinstance(item, questionary.Choice) else questionary.Choice(str(item), value=item)
         for item in choices
     ]
     if is_interactive():
         instruction = instruction or navigation_hint()
-        return questionary.select(
+        question = questionary.select(
             message,
             choices=normalized,
             default=default,
@@ -191,7 +192,15 @@ def select(message, choices, *, default=None, instruction=None):
             style=_prompt_style(),
             use_shortcuts=False,
             use_arrow_keys=True,
-        ).unsafe_ask()
+        )
+        for key, value in hotkeys.items():
+            def register(binding, result):
+                @question.application.key_bindings.add(binding, eager=True)
+                def choose_action(event):
+                    event.app.exit(result=result)
+
+            register(key, value)
+        return question.unsafe_ask()
 
     default_index = 0
     values = [item.value for item in normalized]
@@ -205,6 +214,8 @@ def select(message, choices, *, default=None, instruction=None):
         answer = input(f"Choose [1-{len(normalized)}] [{default_index + 1}]: ").strip()
         if not answer:
             return normalized[default_index].value
+        if answer.lower() in hotkeys:
+            return hotkeys[answer.lower()]
         if answer.isdigit() and 1 <= int(answer) <= len(normalized):
             return normalized[int(answer) - 1].value
 

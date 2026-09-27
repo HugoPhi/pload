@@ -245,6 +245,13 @@ class _Provider:
     def get_dependencies(self, candidate):
         return self.index.dependencies(candidate, self.marker_environment)
 
+    @staticmethod
+    def narrow_requirement_selection(
+        identifiers, resolutions, candidates, information, backtrack_causes,
+    ):
+        """Keep every active criterion; ordering remains get_preference's job."""
+        return identifiers
+
 
 def resolve_metadata(requirements, sources, environment, supported_tags, fetch=None):
     """Return exact packages and wheel metadata without fetching any wheel body."""

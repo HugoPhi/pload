@@ -84,3 +84,42 @@ def test_resolver_refuses_to_download_wheel_when_metadata_is_unavailable():
             {Tag("py3", "none", "any")}, fetch=fetch,
         )
     assert requested == ["https://index.invalid/simple/root-demo/"]
+
+
+def test_resolver_supports_multiple_root_requirements():
+    requested = []
+
+    def fetch(url, accept, maximum):
+        requested.append(url)
+        name = url.rstrip("/").rsplit("/", 1)[-1]
+        if url.endswith(".metadata"):
+            version = "1.0" if "first_demo" in url else "2.0"
+            project = "first-demo" if "first_demo" in url else "second-demo"
+            return (
+                f"Metadata-Version: 2.1\nName: {project}\nVersion: {version}\n\n".encode(),
+                "application/octet-stream",
+            )
+        distribution = name.replace("-", "_")
+        version = "1.0" if name == "first-demo" else "2.0"
+        filename = f"{distribution}-{version}-py3-none-any.whl"
+        metadata = (
+            f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n\n".encode()
+        )
+        return (
+            _project(filename, ("a" if name == "first-demo" else "b") * 64,
+                     hashlib.sha256(metadata).hexdigest()),
+            "application/vnd.pypi.simple.v1+json",
+        )
+
+    packages = resolve_metadata(
+        ["first-demo", "second-demo"],
+        [("default", "https://index.invalid/simple")],
+        {"python": "3.12.1", "implementation": "cpython",
+         "system": "Linux", "machine": "x86_64"},
+        {Tag("py3", "none", "any")}, fetch=fetch,
+    )
+
+    assert [(item["name"], item["version"]) for item in packages] == [
+        ("first-demo", "1.0"), ("second-demo", "2.0"),
+    ]
+    assert not any(url.endswith(".whl") for url in requested)

@@ -1,7 +1,6 @@
-from rich import box
-from rich.console import Console
 from rich.markdown import Markdown
-from rich.table import Table
+
+from pload import ui
 
 GUIDES = {
     (): r"""
@@ -447,7 +446,7 @@ GUIDES[("remote", "add")] = GUIDES[("remote",)]
 
 
 def render_detailed_help(parser, command_path):
-    console = Console(highlight=False)
+    console = ui.console()
     content = GUIDES.get(tuple(command_path), GUIDES[()])
     console.print(Markdown(content.strip()))
 
@@ -458,14 +457,11 @@ def render_detailed_help(parser, command_path):
         label = ", ".join(action.option_strings) if action.option_strings else action.dest
         rows.append((label, action.help or ""))
     if rows:
-        table = Table(
-            title="Related options",
-            box=box.ROUNDED,
-            header_style="bold cyan",
-            border_style="blue",
+        console.print("\n[bold cyan]Options[/]")
+        table = ui.table(
+            ("OPTION", "cyan", {"no_wrap": True}),
+            ("MEANING", "", {}),
         )
-        table.add_column("OPTION", style="bold green", no_wrap=True)
-        table.add_column("MEANING")
         for label, help_text in rows:
             table.add_row(label, help_text)
         console.print(table)

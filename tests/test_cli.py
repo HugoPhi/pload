@@ -124,6 +124,19 @@ def test_simple_commands_have_no_alias_but_long_options_have_short_forms():
         raise AssertionError("new must not have a command alias")
 
 
+def test_parser_errors_are_compact_and_actionable(capsys):
+    with pytest.raises(SystemExit) as error:
+        build_parser().parse_args(["lisst"])
+
+    output = capsys.readouterr().err
+    assert error.value.code == 2
+    assert "error:" in output
+    assert "invalid choice" in output
+    assert "Did you mean 'list'?" in output
+    assert "Try 'pload -h' for help." in output
+    assert not output.startswith("usage:")
+
+
 def test_description_short_option_does_not_conflict_with_detailed_help():
     args = build_parser().parse_args(["new", "-m", "Data tools"])
 
@@ -152,7 +165,7 @@ def test_brief_and_detailed_help_are_distinct(capsys):
     assert "$ pload new -n data" in detailed
     assert "What changes on disk" in detailed
     assert "PLOAD_HOME/runtime" in detailed
-    assert "Related options" in detailed
+    assert "Options" in detailed
 
 
 def test_command_specific_detailed_help_uses_d_flag(capsys):

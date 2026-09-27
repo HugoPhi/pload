@@ -4,13 +4,13 @@ import re
 import sys
 from pathlib import Path
 
+from questionary import Choice
 from rich import box
-from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from pload import __version__
+from pload import __version__, ui
 from pload.display import print_environment_table, print_python_table
 from pload.errors import PloadError
 from pload.help_content import render_detailed_help
@@ -55,7 +55,7 @@ DETAIL_FLAGS = {"-d", "--detailed", "--details"}
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(
+    parser = ui.ArgumentParser(
         prog="pload",
         description=(
             "Create, activate, and remove Python virtual environments without tying "
@@ -472,25 +472,28 @@ def _global_options_table(root_parser):
 
 
 def print_declarative_plan(plan):
-    console = Console(highlight=False)
+    console = ui.console()
     if plan["lock"]["required"]:
         console.print(
             f"[bold yellow]Lock: {plan['lock']['status']}[/] · metadata was unavailable "
             "offline; run [bold green]pload plan[/] with network access"
         )
     python = plan["python"]
-    console.print(Panel.fit(
-        f"[bold]{plan['name']}[/]\nPython: [cyan]{python['method']}[/] · "
-        f"{python['location']} · [bold]{python['status']}[/]",
-        title="[bold cyan]Environment plan[/]",
-        border_style="blue",
-    ))
-    table = Table(box=box.ROUNDED, header_style="bold cyan", border_style="blue")
-    table.add_column("PACKAGE", style="bold green", no_wrap=True)
-    table.add_column("VERSION", style="yellow", no_wrap=True)
-    table.add_column("METHOD", style="cyan", no_wrap=True)
-    table.add_column("STATUS", no_wrap=True)
-    table.add_column("RESOURCE")
+    ui.heading(
+        f"Plan · {plan['name']}",
+        f"Python {python['method']} · {python['status']}",
+        output=console,
+    )
+    console.print(f"[dim]{python['location']}[/]", overflow="ellipsis", no_wrap=True)
+    table = ui.table(
+        ("PACKAGE", "bold", {"width": 15, "overflow": "ellipsis", "no_wrap": True}),
+        ("VERSION", "yellow", {"width": 10, "no_wrap": True}),
+        ("SOURCE", "cyan", {"width": 12, "overflow": "ellipsis", "no_wrap": True}),
+        ("STATUS", "", {"width": 10, "no_wrap": True}),
+        ("RESOURCE", "dim", {"min_width": 14, "ratio": 1,
+                              "overflow": "ellipsis", "no_wrap": True}),
+        expand=True,
+    )
     direct_packages = [
         package for package in plan["packages"] if package.get("direct", True)
     ]
@@ -521,10 +524,10 @@ def print_declarative_plan(plan):
 
 
 def choose_declarative_routes(plan):
-    """Navigate every package route with backtracking and undo in a terminal."""
+    """Choose direct-package routes with familiar cursor-key menus."""
     from pload.resource_plan import PlanSelection
 
-    console = Console(highlight=False)
+    console = ui.console()
     selection = PlanSelection(plan)
     decision_indices = selection.decision_indices()
     if not decision_indices:
@@ -535,53 +538,53 @@ def choose_declarative_routes(plan):
         package_index = decision_indices[cursor]
         package = packages[package_index]
         routes = selection.routes(package_index)
-        console.clear()
-        console.print(Panel.fit(
-            f"[bold green]{package['name']}[/]==[yellow]{package['version']}[/]\n"
-            f"Direct requirement [bold]{cursor + 1}[/] of "
-            f"[bold]{len(decision_indices)}[/]\n"
-            f"[dim]{len(packages) - len(decision_indices)} transitive dependencies "
-            "will be planned automatically[/]",
-            title="[bold cyan]Choose acquisition route[/]", border_style="blue",
-        ))
-        table = Table(box=box.ROUNDED, header_style="bold cyan", border_style="blue")
-        table.add_column("#", justify="right", style="bold yellow")
-        table.add_column("METHOD", style="green")
-        table.add_column("TIME", justify="right")
-        table.add_column("RESOURCE")
-        for index, route in enumerate(routes, 1):
-            marker = "✓" if index == 1 else str(index)
-            seconds = route.get("estimated_seconds", 0)
-            table.add_row(marker, route["method"], f"~{seconds:g}s", route["location"])
-        if routes:
-            console.print(table)
-        else:
-            console.print("[bold red]No valid route is currently available.[/]")
-        console.print(
-            "[dim]number choose · Enter/n next · p previous · u undo · "
-            "r reset fastest · s save · a save & apply · q quit[/]"
+        ui.heading(
+            f"Choose source · {package['name']}=={package['version']}",
+            f"Direct requirement {cursor + 1}/{len(decision_indices)} · "
+            f"{len(packages) - len(decision_indices)} dependencies handled automatically",
+            output=console,
         )
-        command = console.input("[bold cyan]route> [/]").strip().lower()
-        if command.isdigit():
-            try:
-                selection.select(package_index, int(command) - 1)
-            except IndexError:
-                continue
+        choices = []
+        for index, route in enumerate(routes, 1):
+            seconds = route.get("estimated_seconds", 0)
+            recommended = "  recommended" if index == 1 else ""
+            choices.append(Choice(
+                f"{route['method']:<18} ~{seconds:g}s  {route['location']}{recommended}",
+                value=("route", index - 1),
+            ))
+        if cursor:
+            choices.append(Choice("← Previous package", value=("previous", None)))
+        if cursor < len(decision_indices) - 1:
+            choices.append(Choice("→ Keep current choice and continue", value=("next", None)))
+        choices.extend([
+            Choice("↶ Undo last change", value=("undo", None)),
+            Choice("↺ Reset all to recommended", value=("reset", None)),
+            Choice("✓ Save plan", value=("save", None)),
+            Choice("▶ Save and apply", value=("apply", None)),
+            Choice("× Cancel", value=("quit", None)),
+        ])
+        command, value = ui.select(
+            "Select an acquisition source",
+            choices,
+            default=("route", 0) if routes else ("quit", None),
+        )
+        if command == "route":
+            selection.select(package_index, value)
             if cursor < len(decision_indices) - 1:
                 cursor += 1
-        elif command in {"", "n", "next"}:
+        elif command == "next":
             cursor = min(cursor + 1, len(decision_indices) - 1)
-        elif command in {"p", "previous", "back"}:
+        elif command == "previous":
             cursor = max(cursor - 1, 0)
-        elif command in {"u", "undo"}:
+        elif command == "undo":
             selection.undo()
-        elif command in {"r", "reset"}:
+        elif command == "reset":
             selection.reset()
-        elif command in {"s", "save"}:
+        elif command == "save":
             return "save"
-        elif command in {"a", "apply"}:
+        elif command == "apply":
             return "apply"
-        elif command in {"q", "quit"}:
+        elif command == "quit":
             return "quit"
 
 
@@ -604,10 +607,11 @@ def _print_arrow_table(console, title, table):
 
 
 def _brief_help(parser, command_path, root_parser=None):
-    console = Console(highlight=False)
+    console = ui.console()
     title = f"pload {__version__}" if not command_path else "pload " + " ".join(command_path)
     description = parser.description or "Command-line help"
     usage = " ".join(parser.format_usage().split())
+    usage = re.sub(r"\{[^}]+\} \.\.\.", "<COMMAND>", usage)
     if command_path and usage.startswith(f"usage: {parser.prog}"):
         usage = usage.replace(
             f"usage: {parser.prog}",
@@ -723,16 +727,8 @@ def render_help(argv):
 
 def render_landing():
     """Show the no-argument welcome screen and the smallest useful command tour."""
-    console = Console(highlight=False)
-    art = Text(
-        """   ____  _                 _
-  |  _ \\| | ___   __ _  __| |
-  | |_) | |/ _ \\ / _` |/ _` |
-  |  __/| | (_) | (_| | (_| |
-  |_|   |_|\\___/ \\__,_|\\__,_|""",
-        style="bold cyan",
-    )
-    console.print(art)
+    console = ui.console()
+    ui.logo(output=console)
     console.print(f"[bold white]pload {__version__}[/]  [dim]Python environments, kept simple.[/]")
     table = Table(box=box.SIMPLE, header_style="bold cyan", show_edge=False)
     table.add_column("COMMAND", style="bold green", no_wrap=True)
@@ -802,34 +798,40 @@ end'''
 
 def _guided_new(config):
     """Collect useful creation choices when ``pload new`` is run by itself."""
-    console = Console(highlight=False)
-    console.print(Panel.fit(
-        "Choose an interpreter and an optional name. Press Enter to accept defaults.",
-        title="[bold cyan]Guided environment creation[/]",
-        border_style="blue",
-    ))
+    console = ui.console()
+    ui.heading(
+        "Create an environment",
+        "Review each value, then create. Nothing is changed until the final step.",
+        output=console,
+    )
     runtimes = PythonManager(config).discover()
     if runtimes:
-        console.print("[dim]Use a Python ID, alias, version, or interpreter path:[/]")
-        print_python_table(runtimes)
+        runtime_choices = [
+            Choice(
+                f"{runtime.id or '—':<5} {runtime.version:<10} "
+                f"{runtime.source:<10} {runtime.path}",
+                value=runtime.id or runtime.alias or str(runtime.path),
+            )
+            for runtime in runtimes
+        ]
+        runtime_choices.append(Choice("Enter a version or path…", value="__custom__"))
+        version = ui.select(
+            "Python interpreter",
+            runtime_choices,
+            default=runtime_choices[0].value,
+        )
+        if version == "__custom__":
+            version = ui.text("Python version or executable path", default="current")
     else:
         console.print("[yellow]No Python was discovered; the current Python is the default.[/]")
-
-    def ask(label, default=""):
-        suffix = f" [{default}]" if default else ""
-        value = input(f"{label}{suffix}: ").strip()
-        return value or default
-
-    version = ask("Python ID, alias, version, or path", "current")
+        version = "current"
     _, suggested_name = config.resolve_venv_path(version=version)
-    name = ask("Environment name (blank generates one)")
-    if not name:
-        console.print(f"[dim]Generated name: [bold]{suggested_name}[/][/dim]")
-    description = ask("Description (optional)")
-    packages = ask("Packages, separated by spaces (optional)")
+    name = ui.text("Environment name", default=suggested_name)
+    description = ui.text("Description (optional)")
+    packages = ui.text("Packages, separated by spaces (optional)")
     return {
         "python_version": version,
-        "name": name or None,
+        "name": name,
         "description": description or None,
         "requirements": packages.split() or None,
     }
@@ -868,13 +870,13 @@ def run(argv=None):
             result = manager.publish_package(
                 args.package, args.environment, args.repository, args.index,
             )
-            Console(highlight=False).print(
-                f"[bold green]✓ Backed up {result['package']}=={result['version']}[/] "
-                f"to [cyan]{result['repository']}[/]\n"
-                f"[dim]{result['filename']} · sha256:{result['sha256']}[/]"
+            ui.success(
+                f"Backed up {result['package']}=={result['version']} "
+                f"to {result['repository']}",
+                detail=f"{result['filename']} · sha256:{result['sha256']}",
             )
         elif command == "describe":
-            progress_console = Console(highlight=False)
+            progress_console = ui.console()
             print(manager.describe(
                 args.source, args.output, args.name, args.mode, args.repository,
                 args.package_sources,
@@ -883,38 +885,29 @@ def run(argv=None):
                 ),
             ))
         elif command == "lock":
-            progress_console = Console(highlight=False, stderr=True)
-            with progress_console.status(
-                "[cyan]Reading configuration…[/]", spinner="dots",
-            ) as status:
+            with ui.status("Reading configuration…") as update_status:
                 result = manager.lock(
                     args.file, args.offline,
-                    progress=lambda message: status.update(f"[cyan]{message}…[/]"),
+                    progress=lambda message: update_status(f"{message}…"),
                 )
             count = len(result["resolved"])
             action = "Wrote" if result["updated"] else "Reused"
-            Console(highlight=False).print(
-                f"[bold green]✓ {action} {count} locked packages[/] in "
-                f"[cyan]{result['path']}[/]"
+            ui.success(
+                f"{action} {count} locked packages",
+                detail=str(result["path"]),
             )
         elif command == "plan":
             if args.json:
                 plan = manager.plan(args.file, args.offline)
                 print(json.dumps(plan, ensure_ascii=False, indent=2))
             else:
-                progress_console = Console(highlight=False, stderr=True)
-                with progress_console.status(
-                    "[cyan]Reading configuration and available resources…[/]",
-                    spinner="dots",
-                ) as status:
+                with ui.status("Reading configuration and available resources…") as update_status:
                     plan = manager.plan(
                         args.file, args.offline,
-                        progress=lambda message: status.update(
-                            f"[cyan]{message}…[/]"
-                        ),
+                        progress=lambda message: update_status(f"{message}…"),
                     )
                 action = "save"
-                chooser_console = Console(highlight=False)
+                chooser_console = ui.console()
                 if chooser_console.is_terminal and not args.no_ui:
                     action = choose_declarative_routes(plan)
                     if action != "quit":
@@ -923,7 +916,7 @@ def run(argv=None):
                 if action == "apply":
                     chooser_console.print(manager.apply(args.file, offline=args.offline))
         else:
-            progress_console = Console(highlight=False)
+            progress_console = ui.console()
             print(manager.apply(
                 args.file, args.name, args.offline,
                 progress=lambda message: progress_console.print(
@@ -969,11 +962,15 @@ def run(argv=None):
             names = list(dict.fromkeys(names))
         if not names:
             raise PloadError("no environments selected")
+        if not args.yes:
+            ui.heading("Remove environments", "\n".join(f"  {name}" for name in names))
+            if not ui.confirm(
+                f"Remove {len(names)} environment{'s' if len(names) != 1 else ''}?",
+                default=False,
+            ):
+                ui.warning("Removal cancelled")
+                return 0
         for name in names:
-            if not args.yes:
-                confirmation = input(f"Remove {name!r}? Type its name to confirm: ")
-                if confirmation != name:
-                    raise PloadError("removal cancelled")
             venvs.remove_venv(name, project_dir=args.project_dir)
         return 0
 
@@ -1026,7 +1023,7 @@ def run(argv=None):
             if not args.key or args.value is None:
                 raise PloadError("usage: pload cfg set SETTING VALUE")
             path = _set_config_value(config, args.key, args.value)
-            print(f"[*] Updated configuration: {path}")
+            ui.success("Updated configuration", detail=str(path))
             return 0
         effective = dict(config.settings)
         effective.update({
@@ -1044,8 +1041,11 @@ def run(argv=None):
 def main(argv=None):
     try:
         return run(argv)
+    except (KeyboardInterrupt, EOFError):
+        ui.warning("Cancelled")
+        return 130
     except (PloadError, PythonNotFoundError, re.error, OSError) as exc:
-        print(f"pload: error: {exc}", file=sys.stderr)
+        ui.error(str(exc))
         return 1
 
 

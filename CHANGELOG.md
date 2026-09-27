@@ -24,6 +24,12 @@ Pre-release: `1.2.0a1`
 
 ### Added
 
+- Introduce one terminal design system for prompts, tables, progress, success,
+  warning and error output. Guided creation and route planning now use familiar
+  cursor-key menus with numbered non-TTY fallbacks instead of bespoke command
+  loops.
+- Respect `NO_COLOR` consistently and keep animation limited to real terminals;
+  set `PLOAD_NO_PROGRESS=1` to replace spinners with plain status text.
 - Keep user intent in a clean portable `pload.toml` and store pload-managed
   exact dependency, artifact and hash decisions in sibling `.pload_lock.toml`.
 - Add `pload describe`, metadata-only `pload plan` and idempotent `pload apply`.

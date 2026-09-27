@@ -93,6 +93,21 @@ def test_guided_choice_accepts_numeric_selection(monkeypatch, capsys):
     assert "Alibaba Cloud" in output
 
 
+def test_settings_screen_can_revisit_and_edit_any_value(tmp_path, monkeypatch):
+    answers = iter(["bin_dir", "__save__"])
+    monkeypatch.setattr(installer.ui, "select", lambda *args, **kwargs: next(answers))
+    monkeypatch.setattr(
+        installer.ui,
+        "text",
+        lambda message, default="": str(tmp_path / "custom-bin"),
+    )
+
+    args = installer.review_settings(installer_args(tmp_path, yes=False))
+
+    assert args.bin_dir == str(tmp_path / "custom-bin")
+    assert args.yes is True
+
+
 def test_config_only_install_writes_reusable_configuration(tmp_path):
     result = run([
         "--yes",
@@ -181,7 +196,7 @@ def test_shell_configuration_updates_existing_managed_block(monkeypatch, tmp_pat
 def test_installer_has_brief_and_detailed_help(capsys):
     assert run(["-h"]) == 0
     brief = capsys.readouterr().out
-    assert "colored, numbered guided setup" in brief
+    assert "cursor-key guided setup" in brief
     assert "pload-install -h -d" in brief
     assert "--downloads-json-url" in brief
     assert "--home, -H" in brief
@@ -190,7 +205,7 @@ def test_installer_has_brief_and_detailed_help(capsys):
     assert run(["-h", "-d"]) == 0
     detailed = capsys.readouterr().out
     assert "What an interactive run looks like" in detailed
-    assert "Enter a number" in detailed
+    assert "↑/↓ move" in detailed
     assert "Resulting layout" in detailed
     assert "What the installer changes" in detailed
     assert "--downloads-json-url" in detailed

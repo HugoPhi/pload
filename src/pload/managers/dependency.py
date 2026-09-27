@@ -1,7 +1,7 @@
 import subprocess
 
+from pload import ui
 from pload.errors import PloadError
-from pload.managers.color import Colors
 
 
 class DependencyManager:
@@ -19,7 +19,7 @@ class DependencyManager:
         if channel:
             command += ["--index-url", channel]
 
-        print(f"[*] Installing: {' '.join(Colors.green(item) for item in requirements)}")
+        ui.info(f"Installing {' '.join(requirements)}")
         process = subprocess.run(command, check=False)
         if process.returncode != 0:
             raise PloadError("dependency installation failed")

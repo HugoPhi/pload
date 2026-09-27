@@ -21,6 +21,7 @@ complete parameter reference and `-h -d` for practical examples and effects.
 - [Discover and install Python](#discover-and-install-python)
 - [Create and activate environments](#create-and-activate-environments)
 - [Help and aliases](#help-and-aliases)
+- [Terminal experience](#terminal-experience)
 - [Isolation and directory layout](#isolation-and-directory-layout)
 - [Command reference](#command-reference)
 - [Development](#development)
@@ -52,10 +53,11 @@ pipx install pload
 pload-install
 ```
 
-The installer uses colored numbered choices for the pload data directory,
+The installer uses consistent cursor-key choices for the pload data directory,
 launcher directory, virtual-environment directory, Python directory, runtime
-source, pip index, and optional shell integration. Press Enter to accept a
-marked default.
+source, pip index, and optional shell integration. Use `↑`/`↓` to move and
+Enter to accept the highlighted value. Without a terminal UI, the same prompts
+fall back to numbered choices.
 
 After installation it prints an ASCII welcome screen with copyable next steps.
 The same screen is shown whenever you run bare `pload` (see the screenshot at
@@ -92,7 +94,8 @@ pload apply pload.toml
 bodies—and inventories pload/pip/uv caches, compatible existing environments,
 local/SSH stores and indexes. Its interactive chooser shows only dependencies
 written by the user; transitive dependencies are routed automatically. It
-supports previous/next, undo, reset, save and save-and-apply. `apply` executes exactly the saved plan:
+supports previous/next, undo, reset, save and save-and-apply through a
+cursor-key menu. `apply` executes exactly the saved plan:
 it never re-resolves, changes route, falls back, or uploads packages.
 
 Back up a special or slow wheel only when you explicitly request it:
@@ -382,6 +385,19 @@ pload py ls --filter uv,conda
 pload python install 3.12
 pload py p 3.12
 ```
+
+## Terminal experience
+
+All interactive screens share the same keyboard and visual language. Use
+`↑`/`↓` and Enter in guided creation, setup, and package-route selection;
+recommended values start highlighted. Status, success, warning, and error
+messages use the same symbols and colors everywhere, while compact border-light
+tables keep lists readable.
+
+`NO_COLOR=1` disables color. `PLOAD_NO_PROGRESS=1` replaces animated progress
+with plain status lines. Every guided workflow also has an explicit flag-based
+form for scripts. See the [terminal experience specification](docs/terminal-experience.md)
+for the complete interaction and output contract.
 
 ## Isolation and directory layout
 

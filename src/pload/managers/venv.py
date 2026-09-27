@@ -5,11 +5,10 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-from rich.console import Console
 from rich.text import Text
 
+from pload import ui
 from pload.errors import PloadError
-from pload.managers.color import Colors
 
 
 class VenvManager:
@@ -42,7 +41,7 @@ class VenvManager:
         python_exe = self.config.get_python_path(version)
         target_path.parent.mkdir(parents=True, exist_ok=True)
         command = [str(python_exe), "-m", "venv", str(target_path)]
-        console = Console(highlight=False)
+        console = ui.console()
         if console.is_terminal:
             status = Text.assemble(
                 ("Creating ", "bold cyan"),
@@ -55,7 +54,7 @@ class VenvManager:
                     command, capture_output=True, text=True, check=False
                 )
         else:
-            print(f"[*] Creating {Colors.green(display_name)} at {Colors.green(target_path)}")
+            ui.info(f"Creating {display_name} at {target_path}")
             process = subprocess.run(
                 command, capture_output=True, text=True, check=False
             )
@@ -71,7 +70,7 @@ class VenvManager:
                 (display_name, "bold"),
             ))
         else:
-            print(f"[*] Created {Colors.green(display_name)}")
+            ui.success(f"Created {display_name}")
         entry = self.register_environment(
             target_path,
             name=display_name,
@@ -84,7 +83,7 @@ class VenvManager:
                 (entry["id"], "bold cyan"),
             ))
         else:
-            print(f"[*] Assigned {Colors.cyan(entry['id'])}")
+            ui.success(f"Assigned {entry['id']}")
         return target_path
 
     @property
@@ -272,7 +271,7 @@ class VenvManager:
             if Path(entry.get("path", "")).expanduser().resolve() != target_path
         ]
         self._write_registry(data)
-        print(f"[*] Removed {Colors.green(target_path)}")
+        ui.success(f"Removed {target_path}")
 
     def activation_script(self, venv_name, shell=None, project_dir=None):
         path = self.resolve_existing(venv_name, project_dir=project_dir)

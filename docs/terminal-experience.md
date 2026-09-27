@@ -15,6 +15,10 @@ behaviour, not decoration.
   `s` save, `a` apply, and `q` quit.
 - `pload new` is guided when no creation options are supplied. Every guided
   operation also has flags for scripts and automation.
+- When guided creation includes packages, it asks once whether pload should
+  choose the fastest source or the user wants custom per-package choices. The
+  custom list contains only real cache/index routes. Transitive dependencies
+  remain automatic, and one failed request does not prevent later requests.
 - Destructive actions use a conventional `y/N` confirmation. `--yes` is the
   explicit non-interactive alternative.
 - `Ctrl-C` cancels without a traceback.

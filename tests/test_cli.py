@@ -242,6 +242,7 @@ def test_new_without_options_uses_guided_creation(tmp_path, monkeypatch):
             "name": "guided",
             "description": "Created interactively",
             "requirements": None,
+            "package_strategy": None,
         },
     )
     monkeypatch.setattr(
@@ -250,7 +251,7 @@ def test_new_without_options_uses_guided_creation(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         "pload.cli.DependencyManager.install_dependencies",
-        lambda self, path, requirements, channel: None,
+        lambda self, path, requirements, channel, strategy: None,
     )
 
     assert main(["-H", str(tmp_path / "home"), "new"]) == 0

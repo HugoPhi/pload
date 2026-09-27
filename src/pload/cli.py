@@ -360,6 +360,10 @@ Aliases: system=sys, managed=uv""",
 def add_packages(parser):
     parser.add_argument("--channel", "-c", help="Python package index URL")
     parser.add_argument("--requirements", "-r", nargs="+", help="packages to install")
+    parser.add_argument(
+        "--package-strategy", "-s", choices=["auto", "custom"],
+        help="choose package sources automatically or interactively (default: auto)",
+    )
 
 
 def _set_config_value(config, key, value):
@@ -836,11 +840,29 @@ def _guided_new(config):
     name = ui.text("Environment name", default=suggested_name)
     description = ui.text("Description (optional)")
     packages = ui.text("Packages, separated by spaces (optional)")
+    requirements = packages.split() or None
+    package_strategy = None
+    if requirements:
+        package_strategy = ui.select(
+            "Package source strategy",
+            [
+                Choice(
+                    "Automatic  prefer compatible cache, then the configured index",
+                    value="auto",
+                ),
+                Choice(
+                    "Custom     choose a source for each package",
+                    value="custom",
+                ),
+            ],
+            default="auto",
+        )
     return {
         "python_version": version,
         "name": name,
         "description": description or None,
-        "requirements": packages.split() or None,
+        "requirements": requirements,
+        "package_strategy": package_strategy,
     }
 
 
@@ -933,19 +955,25 @@ def run(argv=None):
         return 0
 
     if command == "new":
-        if not any((args.python_version, args.name, args.path, args.description, args.requirements, args.channel)):
+        if not any((
+            args.python_version, args.name, args.path, args.description,
+            args.requirements, args.channel, args.package_strategy,
+        )):
             guided = _guided_new(config)
             args.python_version = guided["python_version"]
             args.name = guided["name"]
             args.description = guided["description"]
             args.requirements = guided["requirements"]
+            args.package_strategy = guided["package_strategy"]
         path = venvs.create_venv(
             version=args.python_version,
             target=args.path,
             name=args.name,
             description=args.description,
         )
-        dependencies.install_dependencies(path, args.requirements, args.channel)
+        dependencies.install_dependencies(
+            path, args.requirements, args.channel, args.package_strategy or "auto",
+        )
         return 0
 
     if command == "init":
@@ -958,7 +986,9 @@ def run(argv=None):
             target=args.venv_dir,
             description=args.description,
         )
-        dependencies.install_dependencies(path, args.requirements, args.channel)
+        dependencies.install_dependencies(
+            path, args.requirements, args.channel, args.package_strategy or "auto",
+        )
         return 0
 
     if command == "rm":

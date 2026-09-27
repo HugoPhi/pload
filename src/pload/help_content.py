@@ -83,6 +83,12 @@ If `--name` is omitted, pload generates a short unique name such as
 guided creator. Use `--message` (or `-m`) for the human
 description; it never affects the generated directory name.
 
+When packages are requested, `--package-strategy auto` (the default) prefers
+a compatible wheel already in pload's cache and otherwise uses the configured
+package index. `--package-strategy custom` (or `-s custom`) opens one source
+choice for each package written on the command line. Dependencies introduced
+by those packages remain automatic, so the chooser stays short.
+
 ## Choose an exact location or interpreter
 
 ```console
@@ -100,8 +106,11 @@ is not appropriate.
 - Creates one virtual-environment directory and one registry entry.
 - Does not modify the system Python or activate the environment automatically.
 - If Python cannot create the environment, the incomplete directory is removed.
-- If later package installation fails, the valid environment remains so it can
-  be inspected or removed with `pload rm`.
+- Requested packages are attempted one at a time. A bad request is reported,
+  later requests still run, and successful installations remain available.
+- If any package failed, pload returns a failure status after all requests and
+  lists every failure. The valid environment remains so it can be inspected or
+  removed with `pload rm`.
 """,
     ("init",): r"""
 # Create an environment for the current project

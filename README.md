@@ -189,7 +189,10 @@ pload v1                          # activate an environment by ID
 
 Run `pload new` without options to start the guided creator. It lists detected
 Python runtimes, then asks for the interpreter, environment name, description,
-and optional packages. Press Enter to accept the suggested value at each step.
+and optional packages. When packages are present, choose **Automatic** to let
+pload prefer a compatible local wheel cache and otherwise use the configured
+index, or **Custom** to choose the source of each top-level package yourself.
+Press Enter to accept the suggested value at each step.
 
 ## Configure later
 
@@ -307,6 +310,7 @@ Create a named environment with a description:
 pload new                     # guided creation
 pload new -n data -v 3.12 -m "Data analysis"
 pload new -n web -v 3.12 -r fastapi uvicorn -m "Web API"
+pload new -n lab -r numpy torch -s custom  # choose each top-level package source
 pload new -v 3.12 --message "Temporary data tools"  # auto-named safely
 pload list
 pload v1
@@ -336,6 +340,13 @@ available number. `pload list` displays environments newest-first:
 The table includes ID, name, Python version, description, and full path. A
 spinner is shown in interactive terminals; redirected and CI output uses stable
 ordinary log lines.
+
+Package requests are installed one at a time. A misspelled, unavailable, or
+invalid request is reported and skipped, while later requests still run and
+successful installations remain in the environment. The command returns a
+failure status at the end when any requested package failed, with one summary
+listing those packages. Source selection applies only to packages explicitly
+entered by the user; pip continues to resolve their transitive dependencies.
 
 ## Help and aliases
 

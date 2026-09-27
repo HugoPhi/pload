@@ -943,15 +943,19 @@ def run(argv=None):
                         plan["plan_path"] = str(manager.save_plan(args.file, plan))
                 print_declarative_plan(plan)
                 if action == "apply":
-                    chooser_console.print(manager.apply(args.file, offline=args.offline))
+                    with ui.status("Applying the saved acquisition plan…") as update_status:
+                        restored = manager.apply(
+                            args.file, offline=args.offline,
+                            progress=update_status,
+                        )
+                    chooser_console.print(restored)
         else:
-            progress_console = ui.console()
-            print(manager.apply(
-                args.file, args.name, args.offline,
-                progress=lambda message: progress_console.print(
-                    Text("• " + message, style="cyan")
-                ),
-            ))
+            with ui.status("Applying the saved acquisition plan…") as update_status:
+                restored = manager.apply(
+                    args.file, args.name, args.offline,
+                    progress=update_status,
+                )
+            print(restored)
         return 0
 
     if command == "new":

@@ -415,8 +415,10 @@ pload apply --offline
 Apply requires a current `.pload_lock.toml` and `.pload_plan.toml`, then installs
 Python when needed, executes each selected route, verifies hashes, creates the
 environment, installs packages and runs `pip check`. It never resolves, tries an
-alternative route, or uploads package bytes. Reapplying
-the same configuration is idempotent; an
+alternative route, or uploads package bytes. A selected `index-exact` route
+downloads from the locked URL even if the same wheel is already cached; the
+verified wheel is then installed locally with package networking disabled.
+Reapplying the same configuration is idempotent; an
 existing environment with different state is never silently overwritten.
 """
 GUIDES[("repo",)] = r"""

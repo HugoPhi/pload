@@ -37,6 +37,15 @@ WHEEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.+!-]*\.whl")
 SHA256 = re.compile(r"[0-9a-f]{64}")
 
 
+def _human_size(value):
+    size = float(value or 0)
+    units = ("B", "KiB", "MiB", "GiB")
+    for unit in units:
+        if size < 1024 or unit == units[-1]:
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+
+
 def normalized_name(value):
     return re.sub(r"[-_.]+", "-", value).lower()
 
@@ -1327,29 +1336,6 @@ class DeclarativeEnvironmentManager:
         compatible = []
         environment_copies = []
         self.cache.mkdir(parents=True, exist_ok=True)
-        repository_fetches = {}
-        for package_plan in plan["packages"]:
-            selected = package_plan["selected"]
-            artifact = selected.get("artifact")
-            if artifact and selected["method"] == "repository":
-                cached = self.cache / artifact["filename"]
-                if not (cached.is_file() and digest(cached) == artifact["sha256"]):
-                    repository_fetches.setdefault(selected["location"], []).append(
-                        (artifact["sha256"], cached)
-                    )
-        for repo_name, fetches in repository_fetches.items():
-            if progress:
-                progress(f"Fetching {len(fetches)} artifacts from {repo_name}")
-            try:
-                ArtifactRepository.fetch_many(
-                    data["repositories"][repo_name], fetches, path.parent,
-                )
-            except PloadError as exc:
-                if progress:
-                    progress(
-                        "Batch fetch failed; retrying the same selected repository "
-                        f"route individually: {exc}"
-                    )
         with tempfile.TemporaryDirectory(prefix="pload-apply-") as temporary:
             stage = Path(temporary)
             for index_number, package_plan in enumerate(plan["packages"], 1):
@@ -1362,18 +1348,60 @@ class DeclarativeEnvironmentManager:
                 artifact = selected.get("artifact")
                 if artifact:
                     cached = self.cache / artifact["filename"]
-                    if not (cached.is_file() and digest(cached) == artifact["sha256"]):
+                    label = f"{package_plan['name']}=={package_plan['version']}"
+                    method = selected["method"]
+                    if method == "cache":
+                        source = Path(selected["location"])
+                        if progress:
+                            progress(
+                                f"[{index_number}/{len(plan['packages'])}] "
+                                f"Using selected cache for {label}"
+                            )
+                        if not source.is_file() or digest(source) != artifact["sha256"]:
+                            raise PloadError(
+                                f"planned route failed for {label} (cache): "
+                                "selected cache artifact changed or disappeared; "
+                                "run pload plan to choose another route"
+                            )
+                        install_artifact = source
+                    else:
+                        action = {
+                            "index-exact": "Downloading",
+                            "repository": "Fetching",
+                            "configuration-artifact": "Copying",
+                            "external-cache": "Copying",
+                        }.get(method, "Acquiring")
+                        size = artifact.get("size")
+                        size_note = f" ({_human_size(size)})" if size else ""
+                        if progress:
+                            progress(
+                                f"[{index_number}/{len(plan['packages'])}] {action} "
+                                f"{label} via {method}:{selected['location']}{size_note}"
+                            )
+                        acquired_dir = stage / f"artifact-{index_number}"
+                        acquired_dir.mkdir()
+                        acquired = acquired_dir / artifact["filename"]
                         try:
-                            self._acquire(path, data, package_plan, selected, cached, stage)
+                            self._acquire(
+                                path, data, package_plan, selected, acquired, stage,
+                                progress=progress,
+                            )
                         except (OSError, PloadError) as exc:
                             raise PloadError(
                                 f"planned route failed for {package_plan['name']}=="
-                                f"{package_plan['version']} ({selected['method']}): {exc}; "
+                                f"{package_plan['version']} ({method}): {exc}; "
                                 "run pload plan to choose another route"
                             ) from exc
-                    if digest(cached) != artifact["sha256"]:
-                        raise PloadError("planned artifact checksum mismatch")
-                    artifacts.append(cached.resolve().as_uri() + "#sha256=" + artifact["sha256"])
+                        if not acquired.is_file() or digest(acquired) != artifact["sha256"]:
+                            raise PloadError("planned artifact checksum mismatch")
+                        pending = cached.with_name(cached.name + "." + uuid.uuid4().hex)
+                        shutil.copyfile(acquired, pending)
+                        pending.replace(cached)
+                        install_artifact = cached
+                    artifacts.append(
+                        install_artifact.resolve().as_uri()
+                        + "#sha256=" + artifact["sha256"]
+                    )
                 else:
                     if selected["method"] == "environment-copy":
                         environment_copies.append(package_plan)
@@ -1533,7 +1561,9 @@ with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as bundle:
                     raise PloadError("environment package contains an unsafe path")
             bundle.extractall(site_packages)
 
-    def _acquire(self, path, data, package, selected, destination, stage):
+    def _acquire(
+        self, path, data, package, selected, destination, stage, progress=None,
+    ):
         artifact = selected["artifact"]
         if selected["method"] == "configuration-artifact":
             shutil.copyfile(selected["location"], destination)
@@ -1555,7 +1585,20 @@ with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as bundle:
                         artifact["url"], headers={"User-Agent": "pload-apply/1"},
                     )
                     with urlopen(request, timeout=60) as response, temporary.open("wb") as output:
-                        shutil.copyfileobj(response, output)
+                        received = 0
+                        expected = artifact.get("size")
+                        while True:
+                            chunk = response.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            output.write(chunk)
+                            received += len(chunk)
+                            if progress:
+                                total = f" / {_human_size(expected)}" if expected else ""
+                                progress(
+                                    f"Downloading {package['name']}=={package['version']}: "
+                                    f"{_human_size(received)}{total}"
+                                )
                 except OSError as exc:
                     raise PloadError(f"cannot download planned artifact: {exc}") from exc
                 if digest(temporary) != artifact["sha256"]:

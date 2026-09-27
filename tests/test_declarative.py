@@ -673,16 +673,8 @@ def test_apply_obeys_selected_route_without_fallback(tmp_path, monkeypatch):
     manager.plan(manifest)
     (manager.cache / wheel.name).unlink()
 
-    calls = []
-
-    def fail_selected(*args):
-        calls.append(args[3]["method"])
-        raise PloadError("selected cache vanished")
-
-    monkeypatch.setattr(manager, "_acquire", fail_selected)
     with pytest.raises(PloadError, match="planned route failed.*cache"):
         manager.apply(manifest)
-    assert calls == ["cache"]
 
 
 def test_apply_downloads_the_exact_url_saved_by_plan(tmp_path, monkeypatch):
@@ -712,6 +704,8 @@ def test_apply_downloads_the_exact_url_saved_by_plan(tmp_path, monkeypatch):
     write_configuration(manifest, data)
     manager = DeclarativeEnvironmentManager(config)
     assert manager.plan(manifest)["packages"][0]["selected"]["method"] == "index-exact"
+    manager.cache.mkdir(parents=True)
+    shutil.copyfile(wheel, manager.cache / wheel.name)
     requested = []
 
     def fake_urlopen(request, timeout):
@@ -719,8 +713,10 @@ def test_apply_downloads_the_exact_url_saved_by_plan(tmp_path, monkeypatch):
         return io.BytesIO(wheel.read_bytes())
 
     monkeypatch.setattr(declarative_module, "urlopen", fake_urlopen)
-    restored = manager.apply(manifest)
+    progress = []
+    restored = manager.apply(manifest, progress=progress.append)
     assert requested == [artifact_url]
+    assert any("Downloading pload-demo==1.0" in item for item in progress)
     assert execute([
         config.get_pip_command(restored)[0], "-c",
         "import pload_demo; print(pload_demo.answer)",

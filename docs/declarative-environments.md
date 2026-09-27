@@ -229,7 +229,11 @@ override it for direct requirements. Transitive requirements use automatic
 ranking so installing `torch` does not ask the user to decide separately for
 `filelock`, `sympy`, and every other implementation detail. If any chosen
 resource changes or disappears, `apply` stops and asks for a new plan; it never
-tries another candidate.
+tries another candidate. The selected method is authoritative: choosing
+`index-exact` performs and verifies that network download even when an identical
+wheel is already present in pload's cache. Apply then installs all verified
+artifacts locally with networking disabled, so `Processing .../cache/wheels/...`
+is the installation phase rather than evidence that the selected route changed.
 
 ## Current boundaries
 

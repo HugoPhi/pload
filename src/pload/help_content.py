@@ -377,8 +377,10 @@ pload plan --no-ui
 Planning resolves missing/stale locks using Simple API pages and independent
 Core Metadata, then checks pload/pip/uv caches, compatible environments,
 adjacent artifacts and content-addressed repositories. It never downloads a
-wheel body. In a terminal the chooser supports previous/next, undo, reset,
-save, and save-and-apply; `--no-ui` selects the fastest routes for automation.
+wheel body. The chooser shows only requirements written in `pload.toml` and
+automatically assigns routes to their transitive dependencies. It supports
+previous/next, undo, reset, save, and save-and-apply; `--no-ui` selects the
+fastest routes for automation.
 """
 GUIDES[("lock",)] = r"""
 # Resolve the user declaration into an exact managed lock

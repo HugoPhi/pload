@@ -491,7 +491,11 @@ def print_declarative_plan(plan):
     table.add_column("METHOD", style="cyan", no_wrap=True)
     table.add_column("STATUS", no_wrap=True)
     table.add_column("RESOURCE")
-    for package in plan["packages"]:
+    direct_packages = [
+        package for package in plan["packages"] if package.get("direct", True)
+    ]
+    transitive_count = len(plan["packages"]) - len(direct_packages)
+    for package in direct_packages:
         selected = package["selected"]
         if selected:
             table.add_row(package["name"], package["version"], selected["method"],
@@ -505,6 +509,11 @@ def print_declarative_plan(plan):
                 table.add_row(package["name"], package["version"], "—", "unavailable",
                               "No resource satisfies the configuration")
     console.print(table)
+    if transitive_count:
+        console.print(
+            f"[dim]+ {transitive_count} transitive dependencies planned "
+            "automatically using their fastest valid routes[/]"
+        )
     console.print(
         "[dim]Saved acquisition choices:[/] "
         f"[cyan]{plan['plan_path']}[/]"
@@ -517,17 +526,22 @@ def choose_declarative_routes(plan):
 
     console = Console(highlight=False)
     selection = PlanSelection(plan)
-    if not plan["packages"]:
+    decision_indices = selection.decision_indices()
+    if not decision_indices:
         return "save"
     cursor = 0
     while True:
         packages = plan["packages"]
-        package = packages[cursor]
-        routes = selection.routes(cursor)
+        package_index = decision_indices[cursor]
+        package = packages[package_index]
+        routes = selection.routes(package_index)
         console.clear()
         console.print(Panel.fit(
             f"[bold green]{package['name']}[/]==[yellow]{package['version']}[/]\n"
-            f"Package [bold]{cursor + 1}[/] of [bold]{len(packages)}[/]",
+            f"Direct requirement [bold]{cursor + 1}[/] of "
+            f"[bold]{len(decision_indices)}[/]\n"
+            f"[dim]{len(packages) - len(decision_indices)} transitive dependencies "
+            "will be planned automatically[/]",
             title="[bold cyan]Choose acquisition route[/]", border_style="blue",
         ))
         table = Table(box=box.ROUNDED, header_style="bold cyan", border_style="blue")
@@ -550,13 +564,13 @@ def choose_declarative_routes(plan):
         command = console.input("[bold cyan]route> [/]").strip().lower()
         if command.isdigit():
             try:
-                selection.select(cursor, int(command) - 1)
+                selection.select(package_index, int(command) - 1)
             except IndexError:
                 continue
-            if cursor < len(packages) - 1:
+            if cursor < len(decision_indices) - 1:
                 cursor += 1
         elif command in {"", "n", "next"}:
-            cursor = min(cursor + 1, len(packages) - 1)
+            cursor = min(cursor + 1, len(decision_indices) - 1)
         elif command in {"p", "previous", "back"}:
             cursor = max(cursor - 1, 0)
         elif command in {"u", "undo"}:

@@ -422,6 +422,39 @@ def test_plan_resolves_metadata_once_without_downloading_wheels(tmp_path, monkey
     assert output == "42"
 
 
+def test_plan_marks_only_user_declared_packages_as_direct(tmp_path, monkeypatch):
+    config = ConfigManager(home=tmp_path / "home")
+    config.get_python_path = lambda version=None: Path(sys.executable)
+    root_wheel = tiny_wheel(tmp_path / "fixture", distribution="root_demo")
+    child_wheel = tiny_wheel(tmp_path / "fixture", distribution="child_demo")
+    data = simple_manifest("exact")
+    data["environment"].update({
+        "python": platform.python_version(),
+        "implementation": sys.implementation.name,
+        "system": platform.system(),
+        "machine": platform.machine(),
+        "dependencies": ["root-demo"],
+    })
+    data["package"] = []
+    manifest = tmp_path / "pload.toml"
+    write_configuration(manifest, data, with_lock=False)
+
+    def fake_metadata(requirements, sources, environment, supported_tags):
+        return [
+            {"name": name, "version": "1.0", "sources": ["default"],
+             "artifact": [{"filename": wheel.name, "sha256": digest(wheel),
+                            "tags": ["py3-none-any"], "repositories": []}]}
+            for name, wheel in (("child-demo", child_wheel), ("root-demo", root_wheel))
+        ]
+
+    monkeypatch.setattr(declarative_module, "resolve_metadata", fake_metadata)
+    plan = DeclarativeEnvironmentManager(config).plan(manifest)
+
+    assert {item["name"]: item["direct"] for item in plan["packages"]} == {
+        "child-demo": False, "root-demo": True,
+    }
+
+
 def test_plan_refreshes_stale_lock_using_only_metadata(tmp_path, monkeypatch):
     config = ConfigManager(home=tmp_path / "home")
     config.get_python_path = lambda version=None: Path(sys.executable)

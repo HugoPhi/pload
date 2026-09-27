@@ -90,8 +90,9 @@ pload apply pload.toml
 
 `plan` fetches only index pages and independent package metadata—never wheel
 bodies—and inventories pload/pip/uv caches, compatible existing environments,
-local/SSH stores and indexes. Its interactive chooser supports previous/next,
-undo, reset, save and save-and-apply. `apply` executes exactly the saved plan:
+local/SSH stores and indexes. Its interactive chooser shows only dependencies
+written by the user; transitive dependencies are routed automatically. It
+supports previous/next, undo, reset, save and save-and-apply. `apply` executes exactly the saved plan:
 it never re-resolves, changes route, falls back, or uploads packages.
 
 Back up a special or slow wheel only when you explicitly request it:

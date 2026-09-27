@@ -27,6 +27,13 @@ class PlanSelection:
             package.get("alternatives", [])
         )
 
+    def decision_indices(self):
+        """Only direct user requirements need interactive route decisions."""
+        return [
+            index for index, package in enumerate(self.plan["packages"])
+            if package.get("direct", True)
+        ]
+
     def select(self, package_index, route_index):
         routes = self.routes(package_index)
         if route_index < 0 or route_index >= len(routes):
@@ -88,6 +95,7 @@ def dump_plan(configuration_path, configuration_sha256, lock_sha256, plan):
             "[[package]]",
             f"name = {_quoted(package['name'])}",
             f"version = {_quoted(package['version'])}",
+            f"direct = {'true' if package.get('direct', True) else 'false'}",
             f"method = {_quoted(selected.get('method', 'unavailable'))}",
             f"location = {_quoted(selected.get('location', ''))}",
             f"status = {_quoted(selected.get('status', 'unavailable'))}",

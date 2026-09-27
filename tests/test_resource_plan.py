@@ -32,3 +32,21 @@ def test_route_selection_supports_navigation_state_undo_and_reset():
     assert plan["packages"][0]["selected"]["method"] == "cache"
     assert selection.undo() is True
     assert plan["packages"][0]["selected"]["method"] == "environment-copy"
+
+
+def test_only_direct_requirements_are_interactive_decisions():
+    plan = {
+        "python": {"status": "ready"}, "ready": True,
+        "packages": [
+            {"name": "torch", "direct": True, "selected": _route("cache"),
+             "alternatives": []},
+            {"name": "filelock", "direct": False, "selected": _route("cache"),
+             "alternatives": [_route("index-exact")]},
+            {"name": "numpy", "direct": True, "selected": _route("cache"),
+             "alternatives": []},
+        ],
+    }
+
+    selection = PlanSelection(plan)
+
+    assert selection.decision_indices() == [0, 2]

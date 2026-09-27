@@ -15,7 +15,8 @@ Pre-release: `1.2.0a1`
   in compatible pload environments. Recheck SHA-256 or installed `RECORD`
   fingerprints during apply.
 - Add an interactive per-package route chooser with previous/next navigation,
-  undo, reset-to-fastest, save and save-and-apply actions.
+  undo, reset-to-fastest, save and save-and-apply actions. Show only direct
+  user requirements; route transitive dependencies automatically.
 - Add explicit `pload remote add PACKAGE --from ENV --remote REPO`; apply and
   describe never publish package bytes automatically.
 - Persist exact artifact URLs and hashes, reject stale or incomplete plans, and

@@ -1051,6 +1051,9 @@ class DeclarativeEnvironmentManager:
     def plan(self, manifest_path, offline=False, progress=None):
         path, data, current, legacy = self._load_state(manifest_path)
         dependencies = data["environment"].get("dependencies", [])
+        direct_names = {
+            normalized_name(_parse_dependency(value).name) for value in dependencies
+        }
         lock_required = bool(dependencies) and not current
         sidecar = lock_path(path)
         lock = {
@@ -1107,6 +1110,7 @@ class DeclarativeEnvironmentManager:
                     pending.append({
                         "name": requirement.name,
                         "version": exact.group(2) if exact else str(requirement.specifier) or "unresolved",
+                        "direct": True,
                         "selected": self._candidate(
                             "lock-required", sidecar, "pending", (0, 0, 0, 0)
                         ),
@@ -1214,6 +1218,7 @@ class DeclarativeEnvironmentManager:
             candidates.sort(key=lambda item: item["cost"])
             plans.append({
                 "name": package["name"], "version": package["version"],
+                "direct": normalized_name(package["name"]) in direct_names,
                 "selected": candidates[0] if candidates else None,
                 "alternatives": candidates[1:],
                 "rejections": rejections,

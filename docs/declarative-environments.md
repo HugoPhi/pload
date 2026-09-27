@@ -25,10 +25,12 @@ pload plan pload.toml       # resolve metadata, inventory and choose routes
 pload apply pload.toml      # execute only the saved plan
 ```
 
-In a terminal, `plan` opens a route chooser. A number selects a route; Enter or
-`n` moves forward, `p` goes back, `u` undoes, `r` restores the fastest choices,
-`s` saves, and `a` saves then applies. Use `pload plan --no-ui` in CI. Use
-`--json` for machine-readable inspection.
+In a terminal, `plan` opens a route chooser for only the direct requirements
+the user wrote in `pload.toml`. Transitive dependencies remain exact and
+auditable, but pload automatically assigns their fastest valid routes. A number
+selects a route; Enter or `n` moves forward, `p` goes back, `u` undoes, `r`
+restores the fastest choices, `s` saves, and `a` saves then applies. Use
+`pload plan --no-ui` in CI. Use `--json` for machine-readable inspection.
 
 ## Three files, one user-owned file
 
@@ -223,8 +225,11 @@ url = "https://files.pythonhosted.org/..."
 
 Automatic ranking minimizes expected time: existing bytes first, compatible
 local environments next, repositories next, and indexes last. The chooser can
-override it. If the chosen resource changes or disappears, `apply` stops and
-asks for a new plan; it never tries another candidate.
+override it for direct requirements. Transitive requirements use automatic
+ranking so installing `torch` does not ask the user to decide separately for
+`filelock`, `sympy`, and every other implementation detail. If any chosen
+resource changes or disappears, `apply` stops and asks for a new plan; it never
+tries another candidate.
 
 ## Current boundaries
 

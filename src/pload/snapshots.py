@@ -59,6 +59,34 @@ print(json.dumps({'python': platform.python_version(),
  'accelerators': accelerators, 'packages': packages}))
 """
 
+RESOURCE_PROBE = r"""
+import hashlib, json, os, platform, sys
+from importlib import metadata
+requested = json.loads(sys.argv[1])
+packages = []
+for requested_name in requested:
+    try:
+        dist = metadata.distribution(requested_name)
+    except metadata.PackageNotFoundError:
+        continue
+    name = dist.metadata.get('Name') or requested_name
+    record = dist.read_text('RECORD') or ''
+    paths = [line.split(',', 1)[0].replace('\\', '/') for line in record.splitlines()
+             if line.strip()]
+    copyable = bool(paths) and all(
+        path and not path.startswith('/') and
+        os.path.normpath(path).replace('\\', '/') != '..' and
+        not os.path.normpath(path).replace('\\', '/').startswith('../')
+        for path in paths
+    )
+    packages.append({'name': name, 'version': dist.version,
+                     'record_sha256': hashlib.sha256(record.encode()).hexdigest(),
+                     'copyable': copyable})
+print(json.dumps({'python': platform.python_version(),
+ 'implementation': sys.implementation.name, 'system': platform.system(),
+ 'machine': platform.machine(), 'packages': packages}))
+"""
+
 
 def execute(command, capture=True, cwd=None, timeout=None, input_text=None):
     try:
@@ -103,6 +131,14 @@ def read_json(path):
 
 def probe(python):
     return json.loads(execute([str(python), "-c", PROBE]))
+
+
+def probe_resources(python, package_names):
+    """Inspect only locked packages needed by planning, without hashing file bodies."""
+    return json.loads(execute([
+        str(python), "-c", RESOURCE_PROBE,
+        json.dumps(sorted(set(package_names))),
+    ]))
 
 
 def public_index(url):

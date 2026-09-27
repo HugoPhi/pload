@@ -79,6 +79,12 @@ def write_configuration(path, data, with_lock=True):
         lock_path(path).write_text(dump_lock(path, locked), encoding="utf-8")
 
 
+def plan_and_save(manager, path, **kwargs):
+    plan = manager.plan(path, **kwargs)
+    manager.save_plan(path, plan)
+    return plan
+
+
 def test_manifest_roundtrip(tmp_path):
     data = simple_manifest()
     path = tmp_path / "pload.toml"
@@ -169,6 +175,36 @@ def test_exact_configuration_requires_an_artifact_route(tmp_path):
     assert manager.plan(path)["ready"] is False
 
 
+def test_plan_analysis_does_not_create_or_overwrite_saved_choices(tmp_path):
+    path = tmp_path / "pload.toml"
+    write_configuration(path, simple_manifest())
+    manager = DeclarativeEnvironmentManager(ConfigManager(home=tmp_path / "home"))
+
+    plan = manager.plan(path)
+    saved_path = Path(plan["plan_path"])
+    assert not saved_path.exists()
+
+    manager.save_plan(path, plan)
+    before = saved_path.read_bytes()
+    manager.plan(path)
+    assert saved_path.read_bytes() == before
+
+
+def test_plan_uses_measurements_instead_of_fixed_fake_times(tmp_path, monkeypatch):
+    path = tmp_path / "pload.toml"
+    write_configuration(path, simple_manifest())
+    monkeypatch.setattr(
+        DeclarativeEnvironmentManager, "_network_rtt", staticmethod(lambda url: 0.123),
+    )
+
+    route = DeclarativeEnvironmentManager(
+        ConfigManager(home=tmp_path / "home")
+    ).plan(path)["packages"][0]["selected"]
+
+    assert route["measurement"] == "RTT 123 ms"
+    assert "estimated_seconds" not in route
+
+
 def test_changed_python_rejects_incompatible_cached_wheel_before_apply(tmp_path, monkeypatch):
     config = ConfigManager(home=tmp_path / "home")
     config.get_python_path = lambda version=None: Path(sys.executable)
@@ -196,7 +232,7 @@ def test_changed_python_rejects_incompatible_cached_wheel_before_apply(tmp_path,
     manager.cache.mkdir(parents=True)
     shutil.copyfile(wheel, manager.cache / wheel.name)
 
-    plan = manager.plan(manifest)
+    plan = plan_and_save(manager, manifest)
     package = plan["packages"][0]
     assert package["selected"] is None
     assert package["rejections"][0]["artifact"] == wheel.name
@@ -247,7 +283,7 @@ def test_cache_plan_applies_without_package_network_access(tmp_path, monkeypatch
     manager = DeclarativeEnvironmentManager(config)
     manager.cache.mkdir(parents=True)
     shutil.copyfile(wheel, manager.cache / wheel.name)
-    assert manager.plan(manifest)["packages"][0]["selected"]["method"] == "cache"
+    assert plan_and_save(manager, manifest)["packages"][0]["selected"]["method"] == "cache"
 
     original_execute = declarative_module.execute
 
@@ -294,11 +330,19 @@ def test_plan_discovers_and_apply_uses_exact_external_cache(tmp_path, monkeypatc
     write_configuration(manifest, data)
     manager = DeclarativeEnvironmentManager(config)
 
-    selected = manager.plan(manifest)["packages"][0]["selected"]
+    selected = plan_and_save(manager, manifest)["packages"][0]["selected"]
     assert selected["method"] == "external-cache"
     assert selected["location"] == str(wheel.resolve())
+    manager.cache.mkdir(parents=True)
+    shutil.copyfile(wheel, manager.cache / wheel.name)
 
     original_execute = declarative_module.execute
+    original_acquire = manager._acquire
+    acquisition_methods = []
+
+    def record_acquisition(*args, **kwargs):
+        acquisition_methods.append(args[3]["method"])
+        return original_acquire(*args, **kwargs)
 
     def reject_download(command, *args, **kwargs):
         if "download" in command:
@@ -306,7 +350,9 @@ def test_plan_discovers_and_apply_uses_exact_external_cache(tmp_path, monkeypatc
         return original_execute(command, *args, **kwargs)
 
     monkeypatch.setattr(declarative_module, "execute", reject_download)
+    monkeypatch.setattr(manager, "_acquire", record_acquisition)
     restored = manager.apply(manifest)
+    assert acquisition_methods == ["external-cache"]
     assert digest(manager.cache / wheel.name) == digest(wheel)
     assert original_execute([
         config.get_pip_command(restored)[0], "-c",
@@ -341,7 +387,7 @@ def test_plan_reuses_package_from_compatible_pload_environment(tmp_path, monkeyp
     write_configuration(manifest, data)
     manager = DeclarativeEnvironmentManager(config)
 
-    selected = manager.plan(manifest)["packages"][0]["selected"]
+    selected = plan_and_save(manager, manifest)["packages"][0]["selected"]
     assert selected["method"] == "environment-copy"
     assert selected["location"] == str(source)
     assert len(selected["fingerprint"]) == 64
@@ -413,7 +459,7 @@ def test_plan_resolves_metadata_once_without_downloading_wheels(tmp_path, monkey
     assert len(resolver_calls) == 1
     manager.cache.mkdir(parents=True)
     shutil.copyfile(wheel, manager.cache / wheel.name)
-    manager.plan(manifest)
+    plan_and_save(manager, manifest)
     restored = manager.apply(manifest)
     assert len(resolver_calls) == 1
     output = original_execute([
@@ -502,7 +548,7 @@ def test_plan_refreshes_stale_lock_using_only_metadata(tmp_path, monkeypatch):
     assert {item["name"] for item in locked["package"]} == {"extra-demo", "pload-demo"}
 
 
-def test_describe_plan_apply_through_content_repository(tmp_path):
+def test_describe_plan_apply_through_content_repository(tmp_path, monkeypatch):
     source_config = ConfigManager(home=tmp_path / "source-home")
     repository = tmp_path / "artifact-store"
     save_settings(source_config.home, {
@@ -542,10 +588,23 @@ def test_describe_plan_apply_through_content_repository(tmp_path):
     target_config = ConfigManager(home=tmp_path / "target-home")
     target_config.get_python_path = lambda version=None: Path(sys.executable)
     target = DeclarativeEnvironmentManager(target_config)
-    plan = target.plan(manifest)
+    plan = plan_and_save(target, manifest)
     assert plan["packages"][0]["selected"]["method"] == "repository"
+    target.cache.mkdir(parents=True)
+    shutil.copyfile(wheel, target.cache / artifact["filename"])
+    original_fetch = declarative_module.ArtifactRepository.fetch.__func__
+    fetches = []
+
+    def record_fetch(cls, *args, **kwargs):
+        fetches.append(args[1])
+        return original_fetch(cls, *args, **kwargs)
+
+    monkeypatch.setattr(
+        declarative_module.ArtifactRepository, "fetch", classmethod(record_fetch),
+    )
     apply_progress = []
     restored = target.apply(manifest, progress=apply_progress.append)
+    assert fetches == [artifact["sha256"]]
     output = execute([target_config.get_pip_command(restored)[0], "-c",
                       "import pload_demo; print(pload_demo.answer)"])
     assert output == "42"
@@ -612,7 +671,7 @@ def test_apply_requires_a_saved_plan_and_never_auto_publishes(tmp_path):
     manager = DeclarativeEnvironmentManager(config)
     with pytest.raises(PloadError, match="plan is missing"):
         manager.apply(manifest)
-    manager.plan(manifest)
+    plan_and_save(manager, manifest)
     manager.apply(manifest)
     assert not (repository / "objects" / checksum).exists()
 
@@ -670,7 +729,8 @@ def test_apply_obeys_selected_route_without_fallback(tmp_path, monkeypatch):
     manager = DeclarativeEnvironmentManager(config)
     manager.cache.mkdir(parents=True)
     shutil.copyfile(wheel, manager.cache / wheel.name)
-    manager.plan(manifest)
+    wheel.unlink()
+    plan_and_save(manager, manifest)
     (manager.cache / wheel.name).unlink()
 
     with pytest.raises(PloadError, match="planned route failed.*cache"):
@@ -703,7 +763,7 @@ def test_apply_downloads_the_exact_url_saved_by_plan(tmp_path, monkeypatch):
     manifest.parent.mkdir()
     write_configuration(manifest, data)
     manager = DeclarativeEnvironmentManager(config)
-    assert manager.plan(manifest)["packages"][0]["selected"]["method"] == "index-exact"
+    assert plan_and_save(manager, manifest)["packages"][0]["selected"]["method"] == "index-exact"
     manager.cache.mkdir(parents=True)
     shutil.copyfile(wheel, manager.cache / wheel.name)
     requested = []
@@ -721,6 +781,80 @@ def test_apply_downloads_the_exact_url_saved_by_plan(tmp_path, monkeypatch):
         config.get_pip_command(restored)[0], "-c",
         "import pload_demo; print(pload_demo.answer)",
     ]) == "42"
+
+
+def test_offline_apply_rejects_saved_network_route(tmp_path, monkeypatch):
+    config = ConfigManager(home=tmp_path / "home")
+    config.get_python_path = lambda version=None: Path(sys.executable)
+    wheel = tiny_wheel(tmp_path / "fixture")
+    data = simple_manifest("exact")
+    data["environment"].update({
+        "python": platform.python_version(),
+        "implementation": sys.implementation.name,
+        "system": platform.system(),
+        "machine": platform.machine(),
+    })
+    data["package"][0]["artifact"] = [{
+        "filename": wheel.name, "sha256": digest(wheel),
+        "tags": ["py3-none-any"], "repositories": [],
+        "url": "https://example.invalid/" + wheel.name,
+    }]
+    manifest = tmp_path / "pload.toml"
+    write_configuration(manifest, data)
+    manager = DeclarativeEnvironmentManager(config)
+    plan_and_save(manager, manifest)
+    monkeypatch.setattr(
+        declarative_module, "urlopen",
+        lambda *args, **kwargs: pytest.fail("offline apply opened the network"),
+    )
+
+    with pytest.raises(PloadError, match="offline apply forbids.*network route"):
+        manager.apply(manifest, offline=True)
+
+
+def test_apply_refuses_to_replace_missing_planned_python(tmp_path):
+    planned_python = tmp_path / "planned-python"
+    planned_python.write_text("placeholder", encoding="utf-8")
+    config = ConfigManager(home=tmp_path / "home")
+    config.get_python_path = lambda version=None: planned_python
+    manifest = tmp_path / "pload.toml"
+    data = simple_manifest("compatible")
+    data["environment"]["dependencies"] = []
+    data["package"] = []
+    write_configuration(manifest, data, with_lock=False)
+    manager = DeclarativeEnvironmentManager(config)
+    plan_and_save(manager, manifest)
+    planned_python.unlink()
+
+    with pytest.raises(PloadError, match="planned Python interpreter.*disappeared"):
+        manager.apply(manifest)
+
+
+def test_compatible_index_route_disables_pip_cache(tmp_path, monkeypatch):
+    config = ConfigManager(home=tmp_path / "home")
+    config.get_python_path = lambda version=None: Path(sys.executable)
+    manifest = tmp_path / "pload.toml"
+    write_configuration(manifest, simple_manifest("compatible"))
+    manager = DeclarativeEnvironmentManager(config)
+    plan_and_save(manager, manifest)
+    monkeypatch.setattr(manager, "_check_runtime", lambda *args: None)
+    environment = tmp_path / "environment"
+
+    def create_environment(*args, **kwargs):
+        environment.mkdir()
+        return environment
+
+    monkeypatch.setattr(VenvManager, "create_venv", create_environment)
+    commands = []
+    monkeypatch.setattr(
+        declarative_module, "execute",
+        lambda command, *args, **kwargs: commands.append(command) or "",
+    )
+
+    manager.apply(manifest)
+
+    route_command = next(command for command in commands if "demo==1.0" in command)
+    assert "--no-cache-dir" in route_command
 
 
 def test_apply_rejects_plan_that_omits_a_locked_package(tmp_path):
@@ -745,6 +879,76 @@ def test_apply_rejects_plan_that_omits_a_locked_package(tmp_path):
     )
     with pytest.raises(PloadError, match="do not match the current lock"):
         manager.apply(manifest)
+
+
+def test_apply_rejects_tampered_route_status_and_artifact_url(tmp_path):
+    config = ConfigManager(home=tmp_path / "home")
+    config.get_python_path = lambda version=None: Path(sys.executable)
+    data = simple_manifest("exact")
+    data["environment"].update({
+        "python": platform.python_version(),
+        "implementation": sys.implementation.name,
+        "system": platform.system(),
+        "machine": platform.machine(),
+    })
+    wheel = tiny_wheel(tmp_path / "fixture")
+    data["package"][0]["artifact"] = [{
+        "filename": wheel.name,
+        "sha256": digest(wheel),
+        "tags": ["py3-none-any"],
+        "repositories": [],
+        "url": "https://locked.invalid/demo.whl",
+    }]
+    manifest = tmp_path / "pload.toml"
+    write_configuration(manifest, data)
+    manager = DeclarativeEnvironmentManager(config)
+    generated = manager.plan(manifest)
+
+    generated["packages"][0]["selected"]["status"] = "ready"
+    manager.save_plan(manifest, generated)
+    with pytest.raises(PloadError, match="route status does not match"):
+        manager.apply(manifest)
+
+    generated = manager.plan(manifest)
+    generated["packages"][0]["selected"]["artifact"]["url"] = (
+        "https://changed.invalid/demo.whl"
+    )
+    manager.save_plan(manifest, generated)
+    with pytest.raises(PloadError, match="artifact URL does not match"):
+        manager.apply(manifest)
+
+
+def test_legacy_exact_download_uses_planned_python_and_disables_pip_cache(
+    tmp_path, monkeypatch,
+):
+    config = ConfigManager(home=tmp_path / "home")
+    manager = DeclarativeEnvironmentManager(config)
+    wheel = tiny_wheel(tmp_path / "fixture")
+    planned_python = tmp_path / "planned-python"
+    command_seen = []
+
+    def fake_execute(command, *args, **kwargs):
+        command_seen.append(command)
+        destination = Path(command[command.index("--dest") + 1])
+        shutil.copyfile(wheel, destination / wheel.name)
+        return ""
+
+    monkeypatch.setattr(declarative_module, "execute", fake_execute)
+    output = tmp_path / "result.whl"
+    manager._acquire(
+        tmp_path / "pload.toml",
+        {"sources": {"default": {"url": "https://index.invalid/simple"}}},
+        {"name": "pload-demo", "version": "1.0"},
+        {
+            "method": "index-exact", "location": "default",
+            "artifact": {"filename": wheel.name, "sha256": digest(wheel)},
+        },
+        output, tmp_path, interpreter=planned_python,
+    )
+
+    assert command_seen[0][:3] == [str(planned_python), "-m", "pip"]
+    assert "--no-cache-dir" in command_seen[0]
+    assert output.read_bytes() == wheel.read_bytes()
 
 
 def test_declarative_commands_and_shell_integration(capsys):

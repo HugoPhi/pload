@@ -7,10 +7,13 @@ import platform
 import re
 import shlex
 import shutil
+import socket
 import sys
 import tempfile
+import time
 import uuid
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
@@ -29,8 +32,16 @@ from pload.managers.platform import PythonNotFoundError
 from pload.managers.pyversion import PythonManager
 from pload.managers.venv import VenvManager
 from pload.metadata_resolver import resolve_metadata
-from pload.resource_plan import file_digest, load_plan, write_plan
-from pload.snapshots import RepositoryManager, digest, execute, probe, public_index, safe_name
+from pload.resource_plan import file_digest, load_plan, plan_path, write_plan
+from pload.snapshots import (
+    RepositoryManager,
+    digest,
+    execute,
+    probe,
+    probe_resources,
+    public_index,
+    safe_name,
+)
 
 PIN = re.compile(r"([A-Za-z0-9][A-Za-z0-9_.-]*)==([A-Za-z0-9][A-Za-z0-9_.+!-]*)")
 WHEEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.+!-]*\.whl")
@@ -44,6 +55,10 @@ def _human_size(value):
         if size < 1024 or unit == units[-1]:
             return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
         size /= 1024
+
+
+def _duration(value):
+    return f"{value * 1000:.0f} ms" if value < 1 else f"{value:.2f} s"
 
 
 def normalized_name(value):
@@ -620,26 +635,57 @@ class DeclarativeEnvironmentManager:
         return list(dict.fromkeys(roots))
 
     @staticmethod
-    def _find_external_artifact(roots, artifact):
-        """Find an exact wheel in known caches; matching a name alone is insufficient."""
+    def _index_external_artifacts(roots, filenames):
+        """Walk every external cache once instead of once per locked package."""
+        wanted = set(filenames)
+        found = {filename: [] for filename in wanted}
         for root in roots:
             try:
-                matches = root.rglob(artifact["filename"])
-                for candidate in matches:
-                    if candidate.is_file() and digest(candidate) == artifact["sha256"]:
-                        return candidate
+                for candidate in root.rglob("*.whl"):
+                    if candidate.name in wanted and candidate.is_file():
+                        found[candidate.name].append(candidate)
             except OSError:
                 continue
-        return None
+        return found
 
-    def _environment_resources(self, expected, progress=None):
+    @staticmethod
+    def _verify_local_artifact(path, checksum):
+        started = time.perf_counter()
+        try:
+            valid = Path(path).is_file() and digest(path) == checksum
+        except OSError:
+            valid = False
+        elapsed = max(time.perf_counter() - started, 1e-6)
+        if not valid:
+            return False, elapsed, None
+        size = Path(path).stat().st_size
+        rate = size / elapsed
+        return True, elapsed, f"read {_human_size(rate)}/s"
+
+    @staticmethod
+    def _network_rtt(url):
+        parsed = urlsplit(url)
+        if not parsed.hostname:
+            return None
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        started = time.perf_counter()
+        try:
+            with socket.create_connection((parsed.hostname, port), timeout=2):
+                pass
+        except OSError:
+            return None
+        return time.perf_counter() - started
+
+    def _environment_resources(self, expected, package_names, progress=None):
         """Index exact, safely copyable distributions in compatible pload environments."""
         resources = {}
         for environment in VenvManager(self.config).environments(register_discovered=False):
+            if environment.get("python") != expected.get("python"):
+                continue
             root = Path(environment["path"])
             interpreter = root / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
             try:
-                runtime = probe(interpreter)
+                runtime = probe_resources(interpreter, package_names)
             except PloadError:
                 continue
             if any(runtime.get(key) != expected.get(key) for key in
@@ -1130,10 +1176,8 @@ class DeclarativeEnvironmentManager:
                     "path": str(path), "name": data["name"], "python": python_action,
                     "packages": pending, "ready": False, "lock": lock,
                 }
-                result["plan_path"] = str(write_plan(
-                    path, configuration_digest(data),
-                    file_digest(sidecar) if sidecar.is_file() else "", result,
-                ))
+                result["plan_path"] = str(plan_path(path))
+                result["saved"] = False
                 return result
         repository_checksums = {}
         for package in packages:
@@ -1149,19 +1193,75 @@ class DeclarativeEnvironmentManager:
                             artifact["sha256"]
                         )
         repository_objects = {}
-        for repo_name, checksums in repository_checksums.items():
-            if progress:
-                progress(f"Checking artifact repository {repo_name}")
+        repository_rtt = {}
+        repository_pool = ThreadPoolExecutor(max_workers=max(1, len(repository_checksums)))
+        repository_futures = {}
+
+        def check_repository(repo_name, checksums):
+            started = time.perf_counter()
             try:
-                repository_objects[repo_name] = ArtifactRepository.contains_many(
+                objects = ArtifactRepository.contains_many(
                     repositories[repo_name], checksums, path.parent,
                 )
             except PloadError:
-                repository_objects[repo_name] = set()
+                objects = set()
+            return objects, time.perf_counter() - started
+
+        for repo_name, checksums in repository_checksums.items():
+            if progress:
+                progress(f"Checking artifact repository {repo_name}")
+            repository_futures[repo_name] = repository_pool.submit(
+                check_repository, repo_name, checksums,
+            )
         external_cache_roots = self._external_cache_roots()
-        environment_resources = self._environment_resources(
-            data["environment"], progress=progress,
+        compatible_filenames = {
+            artifact["filename"]
+            for package in packages
+            for artifact in package.get("artifact", [])
+            if _artifact_is_compatible(artifact, supported_tags)
+        }
+        external_artifacts = self._index_external_artifacts(
+            external_cache_roots, compatible_filenames,
         )
+        environment_resources = self._environment_resources(
+            data["environment"],
+            [package["name"] for package in packages],
+            progress=progress,
+        )
+        endpoint_urls = {}
+        if network_allowed:
+            urls = [
+                artifact.get("url")
+                for package in packages for artifact in package.get("artifact", [])
+                if artifact.get("url")
+            ] + [
+                source.get("url") for source in data.get("sources", {}).values()
+                if source.get("kind") == "index" and source.get("url")
+            ]
+            for url in urls:
+                parsed = urlsplit(url)
+                key = (parsed.scheme, parsed.hostname, parsed.port)
+                endpoint_urls.setdefault(key, url)
+        endpoint_rtt = {}
+        if endpoint_urls:
+            with ThreadPoolExecutor(max_workers=min(4, len(endpoint_urls))) as pool:
+                measured = pool.map(self._network_rtt, endpoint_urls.values())
+                endpoint_rtt = dict(zip(endpoint_urls, measured))
+        for repo_name, future in repository_futures.items():
+            repository_objects[repo_name], repository_rtt[repo_name] = future.result()
+        repository_pool.shutdown()
+
+        def network_measurement(url):
+            parsed = urlsplit(url or "")
+            latency = endpoint_rtt.get((parsed.scheme, parsed.hostname, parsed.port))
+            return (f"RTT {_duration(latency)}" if latency is not None
+                    else "RTT unavailable")
+
+        def network_cost(url):
+            parsed = urlsplit(url or "")
+            latency = endpoint_rtt.get((parsed.scheme, parsed.hostname, parsed.port))
+            return latency if latency is not None else float("inf")
+
         plans = []
         for package in packages:
             candidates = []
@@ -1180,19 +1280,32 @@ class DeclarativeEnvironmentManager:
                     continue
                 cached = self.cache / artifact["filename"]
                 adjacent = path.parent / "artifacts" / artifact["filename"]
-                if cached.is_file() and digest(cached) == artifact["sha256"]:
+                valid, elapsed, measurement = self._verify_local_artifact(
+                    cached, artifact["sha256"],
+                )
+                if valid:
                     candidates.append(self._candidate(
-                        "cache", cached, "ready", (0, 0, 0, 0), artifact
+                        "cache", cached, "ready", (0, elapsed, 0), artifact,
+                        measurement,
                     ))
-                if adjacent.is_file() and digest(adjacent) == artifact["sha256"]:
+                valid, elapsed, measurement = self._verify_local_artifact(
+                    adjacent, artifact["sha256"],
+                )
+                if valid:
                     candidates.append(self._candidate(
-                        "configuration-artifact", adjacent, "ready", (0, 0, 0, 1), artifact
+                        "configuration-artifact", adjacent, "ready", (1, elapsed, 1),
+                        artifact, measurement,
                     ))
-                external = self._find_external_artifact(external_cache_roots, artifact)
-                if external:
-                    candidates.append(self._candidate(
-                        "external-cache", external, "ready", (0, 0, 0, 2), artifact
-                    ))
+                for external in external_artifacts.get(artifact["filename"], []):
+                    valid, elapsed, measurement = self._verify_local_artifact(
+                        external, artifact["sha256"],
+                    )
+                    if valid:
+                        candidates.append(self._candidate(
+                            "external-cache", external, "ready", (1, elapsed, 2),
+                            artifact, measurement,
+                        ))
+                        break
                 repo_names = dict.fromkeys(
                     artifact.get("repositories", []) + preferred_repositories
                 )
@@ -1201,7 +1314,9 @@ class DeclarativeEnvironmentManager:
                     if (spec and artifact["sha256"]
                             in repository_objects.get(repo_name, set())):
                         candidates.append(self._candidate(
-                            "repository", repo_name, "remote", (0, 0, 1, repo_name), artifact
+                            "repository", repo_name, "remote",
+                            (3, repository_rtt[repo_name], repo_name), artifact,
+                            f"RTT {_duration(repository_rtt[repo_name])}",
                         ))
                 if network_allowed:
                     for source_name in package.get("sources", []):
@@ -1209,20 +1324,26 @@ class DeclarativeEnvironmentManager:
                         if source and source.get("kind") == "index":
                             candidates.append(self._candidate(
                                 "index-exact", source_name, "network",
-                                (0, 0, 2, source_name), artifact,
+                                (3, network_cost(
+                                    artifact.get("url") or source["url"]
+                                ), source_name),
+                                artifact,
+                                network_measurement(artifact.get("url") or source["url"]),
                             ))
             environment_key = (normalized_name(package["name"]), package["version"])
             for resource in environment_resources.get(environment_key, []):
                 candidate = self._candidate(
                     "environment-copy", resource["path"], "ready",
-                    (0, 0, 0, 3, resource["id"]),
+                    (2, 0, resource["id"]), measurement="local package",
                 )
                 candidate["fingerprint"] = resource["fingerprint"]
                 candidates.append(candidate)
             if policy.get("reproducibility") == "compatible" and network_allowed:
                 source_name = (package.get("sources") or ["default"])[0]
                 candidates.append(self._candidate(
-                    "index-resolve", source_name, "network", (1, 1, 2, source_name)
+                    "index-resolve", source_name, "network",
+                    (3, network_cost(data["sources"][source_name]["url"]), source_name),
+                    measurement=network_measurement(data["sources"][source_name]["url"]),
                 ))
             candidates.sort(key=lambda item: item["cost"])
             plans.append({
@@ -1236,25 +1357,18 @@ class DeclarativeEnvironmentManager:
                  and all(item["selected"] for item in plans))
         result = {"path": str(path), "name": data["name"], "python": python_action,
                   "packages": plans, "ready": ready, "lock": lock}
-        result["plan_path"] = str(write_plan(
-            path, configuration_digest(data), file_digest(sidecar), result,
-        ))
+        result["plan_path"] = str(plan_path(path))
+        result["saved"] = False
         return result
 
     @staticmethod
-    def _candidate(method, location, status, cost, artifact=None):
+    def _candidate(
+        method, location, status, cost, artifact=None, measurement=None,
+    ):
         result = {"method": method, "location": str(location), "status": status,
                   "cost": list(cost)}
-        result["estimated_seconds"] = {
-            "cache": 0.05,
-            "configuration-artifact": 0.1,
-            "external-cache": 0.2,
-            "environment-copy": 0.5,
-            "repository": 5.0,
-            "index-exact": 30.0,
-            "index-resolve": 45.0,
-            "lock-required": 0.0,
-        }.get(method, 0.0)
+        if measurement:
+            result["measurement"] = measurement
         if artifact:
             result["artifact"] = artifact
         return result
@@ -1315,11 +1429,23 @@ class DeclarativeEnvironmentManager:
                     label += f" ({item['rejections'][0]['reason']})"
                 details.append(label)
             raise PloadError("no valid reproduction route for: " + ", ".join(details))
-        if plan["python"]["method"] == "install-python":
+        python_method = plan["python"].get("method")
+        if offline and python_method == "install-python":
+            raise PloadError("offline apply forbids the selected Python network route")
+        if python_method == "install-python":
             if plan["python"]["status"] == "unavailable":
                 raise PloadError("required Python is unavailable while offline")
-            PythonManager(self.config).install_python(data["environment"]["python"])
-        interpreter = self.config.get_python_path(data["environment"]["python"])
+            interpreter = Path(PythonManager(self.config).install_python(
+                data["environment"]["python"]
+            )).resolve()
+        elif python_method == "reuse-python":
+            interpreter = Path(plan["python"]["location"]).expanduser().resolve()
+            if not interpreter.is_file():
+                raise PloadError(
+                    "planned Python interpreter changed or disappeared; run pload plan again"
+                )
+        else:
+            raise PloadError(f"unsupported Python acquisition method: {python_method}")
         self._check_runtime(interpreter, data["environment"])
         target_name = name or data["name"]
         expected_state = manifest_digest(data)
@@ -1345,6 +1471,11 @@ class DeclarativeEnvironmentManager:
                         f"{package_plan['name']}=={package_plan['version']}"
                     )
                 selected = package_plan["selected"]
+                if offline and selected["method"] in {"index-exact", "index-resolve"}:
+                    raise PloadError(
+                        f"offline apply forbids the selected network route for "
+                        f"{package_plan['name']}=={package_plan['version']}"
+                    )
                 artifact = selected.get("artifact")
                 if artifact:
                     cached = self.cache / artifact["filename"]
@@ -1384,7 +1515,7 @@ class DeclarativeEnvironmentManager:
                         try:
                             self._acquire(
                                 path, data, package_plan, selected, acquired, stage,
-                                progress=progress,
+                                interpreter=interpreter, progress=progress,
                             )
                         except (OSError, PloadError) as exc:
                             raise PloadError(
@@ -1424,7 +1555,7 @@ class DeclarativeEnvironmentManager:
                 for package_plan in compatible:
                     source_name = package_plan["selected"]["location"]
                     source = data.get("sources", {}).get(source_name, {})
-                    command = pip + ["install", "--no-deps"]
+                    command = pip + ["install", "--no-deps", "--no-cache-dir"]
                     if data["policy"].get("source_build") == "forbid":
                         command += ["--only-binary=:all:"]
                     if source.get("url"):
@@ -1466,6 +1597,23 @@ class DeclarativeEnvironmentManager:
     @staticmethod
     def _validate_saved_plan(saved, data):
         """Bind every executable route to one exact package in the current lock."""
+        python = saved.get("python")
+        if not isinstance(python, dict):
+            raise PloadError("acquisition plan has no Python route")
+        if python.get("method") not in {"reuse-python", "install-python"}:
+            raise PloadError("acquisition plan has an unsupported Python route")
+        if python.get("status") not in {"ready", "network", "unavailable"}:
+            raise PloadError("acquisition plan has an invalid Python route status")
+        if python.get("method") == "install-python" and str(python.get("location")) != str(
+            data["environment"]["python"]
+        ):
+            raise PloadError("planned Python installation does not match the configuration")
+        expected_python_status = {
+            "reuse-python": {"ready"},
+            "install-python": {"network", "unavailable"},
+        }[python["method"]]
+        if python["status"] not in expected_python_status:
+            raise PloadError("Python route status does not match its acquisition method")
         locked = {
             (normalized_name(package["name"]), package["version"]): package
             for package in DeclarativeEnvironmentManager._locked_packages(data)
@@ -1488,24 +1636,66 @@ class DeclarativeEnvironmentManager:
             method = package.get("method")
             if method not in allowed_methods:
                 raise PloadError(f"unsupported method in acquisition plan: {method}")
+            expected_status = {
+                "cache": "ready",
+                "configuration-artifact": "ready",
+                "external-cache": "ready",
+                "environment-copy": "ready",
+                "repository": "remote",
+                "index-exact": "network",
+                "index-resolve": "network",
+                "unavailable": "unavailable",
+            }[method]
+            if package.get("status") != expected_status:
+                raise PloadError(
+                    f"route status does not match method {method} for "
+                    f"{package.get('name')}=={package.get('version')}"
+                )
             artifact = package.get("artifact")
             if method in artifact_methods:
-                allowed = {
-                    (item["filename"], item["sha256"])
+                allowed_artifacts = {
+                    (item["filename"], item["sha256"]): item
                     for item in locked[key].get("artifact", [])
                 }
                 identity = (
                     artifact.get("filename"), artifact.get("sha256")
                 ) if isinstance(artifact, dict) else None
-                if identity not in allowed:
+                if identity not in allowed_artifacts:
                     raise PloadError(
                         f"planned artifact is not present in the lock for "
+                        f"{package['name']}=={package['version']}"
+                    )
+                locked_artifact = allowed_artifacts[identity]
+                if artifact.get("url", "") != locked_artifact.get("url", ""):
+                    raise PloadError(
+                        f"planned artifact URL does not match the lock for "
                         f"{package['name']}=={package['version']}"
                     )
             elif artifact:
                 raise PloadError(f"method {method} must not contain a wheel artifact")
             if method == "environment-copy" and not package.get("fingerprint"):
                 raise PloadError("environment-copy route has no package fingerprint")
+            if method in {"index-exact", "index-resolve"}:
+                source_name = package.get("location")
+                if source_name not in locked[key].get("sources", []):
+                    raise PloadError(
+                        f"planned index is not locked for {package['name']}=="
+                        f"{package['version']}"
+                    )
+                source = data.get("sources", {}).get(source_name)
+                if not source or source.get("kind") != "index":
+                    raise PloadError(f"planned package index is unavailable: {source_name}")
+            if method == "repository":
+                repository = package.get("location")
+                if repository not in data.get("repositories", {}):
+                    raise PloadError(f"planned repository is unavailable: {repository}")
+                allowed_repositories = set(locked_artifact.get("repositories", []))
+                allowed_repositories.update(data["policy"].get("repositories", []))
+                if repository not in allowed_repositories:
+                    raise PloadError(
+                        f"planned repository is not permitted for "
+                        f"{package['name']}=={package['version']}"
+                    )
             if (method == "index-resolve"
                     and data["policy"].get("reproducibility") != "compatible"):
                 raise PloadError("index-resolve is forbidden by exact reproducibility policy")
@@ -1562,7 +1752,8 @@ with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as bundle:
             bundle.extractall(site_packages)
 
     def _acquire(
-        self, path, data, package, selected, destination, stage, progress=None,
+        self, path, data, package, selected, destination, stage, interpreter,
+        progress=None,
     ):
         artifact = selected["artifact"]
         if selected["method"] == "configuration-artifact":
@@ -1609,9 +1800,10 @@ with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as bundle:
                 download = stage / normalized_name(package["name"])
                 download.mkdir(exist_ok=True)
                 execute([
-                    str(self.config.get_python_path(data["environment"]["python"])),
+                    str(interpreter),
                     "-m", "pip", "download", "--only-binary=:all:", "--no-deps",
-                    "--dest", str(download), "--index-url", source["url"],
+                    "--no-cache-dir", "--dest", str(download),
+                    "--index-url", source["url"],
                     f"{package['name']}=={package['version']}",
                 ])
                 candidate = download / artifact["filename"]

@@ -4,6 +4,7 @@ import hashlib
 import json
 import platform
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from email.parser import BytesParser
 from email.policy import compat32
@@ -104,6 +105,15 @@ class MetadataIndex:
         self.fetch = fetch or _read_url
         self.project_cache = {}
         self.dependency_cache = {}
+        self.source_metadata_capability = {}
+
+    def prefetch(self, requirements):
+        names = sorted({canonicalize_name(item.name) for item in requirements})
+        missing = [name for name in names if name not in self.project_cache]
+        if not missing:
+            return
+        with ThreadPoolExecutor(max_workers=min(8, len(missing))) as pool:
+            list(pool.map(self.candidates, missing))
 
     def candidates(self, name):
         key = canonicalize_name(name)
@@ -113,6 +123,8 @@ class MetadataIndex:
         metadata_missing = []
         source_errors = []
         for source_name, base_url in self.sources:
+            if self.source_metadata_capability.get(source_name) is False:
+                continue
             project_url = base_url.rstrip("/") + "/" + key + "/"
             try:
                 body, content_type = self.fetch(
@@ -135,6 +147,8 @@ class MetadataIndex:
                 except UnicodeDecodeError as exc:
                     raise PloadError(f"invalid Simple API HTML response for {name}") from exc
                 files = parser.files
+            source_versions = {}
+            source_has_metadata = False
             for record in files:
                 filename = record.get("filename", "")
                 try:
@@ -162,6 +176,7 @@ class MetadataIndex:
                 if metadata_hashes is None:
                     metadata_missing.append(filename)
                     continue
+                source_has_metadata = True
                 url = urljoin(project_url, record["url"])
                 candidate = MetadataCandidate(
                     name=key, version=version, source=source_name,
@@ -169,9 +184,15 @@ class MetadataIndex:
                     sha256=sha256, size=int(record.get("size") or 0),
                     metadata_sha256=metadata_hashes.get("sha256", ""),
                 )
-                current = by_version.get(version)
+                current = source_versions.get(version)
                 if current is None or (candidate.size or sys.maxsize) < (current.size or sys.maxsize):
-                    by_version[version] = candidate
+                    source_versions[version] = candidate
+            self.source_metadata_capability[source_name] = source_has_metadata
+            if source_versions:
+                # Preserve source priority for duplicate versions while still
+                # retaining versions that exist only on a later fallback index.
+                for version, candidate in source_versions.items():
+                    by_version.setdefault(version, candidate)
         if not by_version and metadata_missing:
             raise PloadError(
                 f"index has compatible files for {name}, but does not expose independent "
@@ -215,6 +236,7 @@ class MetadataIndex:
                 continue
             requirements.append(requirement)
         self.dependency_cache[candidate] = requirements
+        self.prefetch(requirements)
         return requirements
 
 
@@ -267,6 +289,7 @@ def resolve_metadata(requirements, sources, environment, supported_tags, fetch=N
         "extra": "",
     })
     index = MetadataIndex(sources, supported_tags, python, fetch=fetch)
+    index.prefetch(parsed)
     try:
         result = Resolver(_Provider(index, marker_environment), BaseReporter()).resolve(parsed)
     except ResolutionImpossible as exc:

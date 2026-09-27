@@ -318,7 +318,7 @@ Aliases: system=sys, managed=uv""",
     plan.add_argument("--json", "-j", action="store_true", help="emit machine-readable JSON")
     plan.add_argument(
         "--no-ui", "-N", action="store_true",
-        help="select the fastest routes without opening the interactive route chooser",
+        help="save recommended measured routes without opening the interactive chooser",
     )
     apply = subparsers.add_parser(
         "apply", description="Materialize the desired environment from available resources.",
@@ -519,12 +519,15 @@ def print_declarative_plan(plan):
     if transitive_count:
         console.print(
             f"[dim]+ {transitive_count} transitive dependencies planned "
-            "automatically using their fastest valid routes[/]"
+            "automatically using their lowest-cost valid routes[/]"
         )
-    console.print(
-        "[dim]Saved acquisition choices:[/] "
-        f"[cyan]{plan['plan_path']}[/]"
-    )
+    if plan.get("saved"):
+        console.print(
+            "[dim]Saved acquisition choices:[/] "
+            f"[cyan]{plan['plan_path']}[/]"
+        )
+    else:
+        console.print("[dim]Acquisition choices were not saved.[/]")
 
 
 def choose_declarative_routes(plan):
@@ -550,10 +553,11 @@ def choose_declarative_routes(plan):
         )
         choices = []
         for index, route in enumerate(routes, 1):
-            seconds = route.get("estimated_seconds", 0)
+            measurement = route.get("measurement", "not measured")
             recommended = "  recommended" if index == 1 else ""
             choices.append(Choice(
-                f"{route['method']:<18} ~{seconds:g}s  {route['location']}{recommended}",
+                f"{route['method']:<18} {measurement:<20} "
+                f"{route['location']}{recommended}",
                 value=("route", index - 1),
             ))
         if not choices:
@@ -939,8 +943,9 @@ def run(argv=None):
                 chooser_console = ui.console()
                 if chooser_console.is_terminal and not args.no_ui:
                     action = choose_declarative_routes(plan)
-                    if action != "quit":
-                        plan["plan_path"] = str(manager.save_plan(args.file, plan))
+                if action != "quit":
+                    plan["plan_path"] = str(manager.save_plan(args.file, plan))
+                    plan["saved"] = True
                 print_declarative_plan(plan)
                 if action == "apply":
                     with ui.status("Applying the saved acquisition plan…") as update_status:

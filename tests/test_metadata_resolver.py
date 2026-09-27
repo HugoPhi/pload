@@ -123,3 +123,41 @@ def test_resolver_supports_multiple_root_requirements():
         ("first-demo", "1.0"), ("second-demo", "2.0"),
     ]
     assert not any(url.endswith(".whl") for url in requested)
+
+
+def test_later_source_can_supply_version_missing_from_preferred_source():
+    first_metadata = b"Metadata-Version: 2.1\nName: root-demo\nVersion: 1.0\n\n"
+    later_metadata = b"Metadata-Version: 2.1\nName: root-demo\nVersion: 2.0\n\n"
+    first_wheel = "root_demo-1.0-py3-none-any.whl"
+    later_wheel = "root_demo-2.0-py3-none-any.whl"
+    responses = {
+        "https://first.invalid/simple/root-demo/": _project(
+            first_wheel, "a" * 64, hashlib.sha256(first_metadata).hexdigest(),
+        ),
+        "https://later.invalid/simple/root-demo/": _project(
+            later_wheel, "b" * 64, hashlib.sha256(later_metadata).hexdigest(),
+        ),
+        "https://files.invalid/" + first_wheel + ".metadata": first_metadata,
+        "https://files.invalid/" + later_wheel + ".metadata": later_metadata,
+    }
+
+    def fetch(url, accept, maximum):
+        return responses[url], (
+            "application/vnd.pypi.simple.v1+json"
+            if url.endswith("/") else "application/octet-stream"
+        )
+
+    packages = resolve_metadata(
+        ["root-demo>=2"],
+        [
+            ("preferred", "https://first.invalid/simple"),
+            ("fallback", "https://later.invalid/simple"),
+        ],
+        {"python": "3.12.1", "implementation": "cpython",
+         "system": "Linux", "machine": "x86_64"},
+        {Tag("py3", "none", "any")}, fetch=fetch,
+    )
+
+    assert [(item["version"], item["sources"]) for item in packages] == [
+        ("2.0", ["fallback"]),
+    ]

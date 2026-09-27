@@ -27,9 +27,10 @@ pload apply pload.toml      # execute only the saved plan
 
 In a terminal, `plan` opens a route chooser for only the direct requirements
 the user wrote in `pload.toml`. Transitive dependencies remain exact and
-auditable, but pload automatically assigns their fastest valid routes. A number
-selects a route; Enter or `n` moves forward, `p` goes back, `u` undoes, `r`
-restores the fastest choices, `s` saves, and `a` saves then applies. Use
+auditable, but pload automatically assigns their lowest-cost valid routes from
+the measured data available. Arrow keys and Enter select a real route; `n`
+moves forward, `p` goes back, `u` undoes, `r` restores the recommended choices,
+`s` saves, and `a` saves then applies. Use
 `pload plan --no-ui` in CI. Use `--json` for machine-readable inspection.
 
 ## Three files, one user-owned file
@@ -205,7 +206,7 @@ version = "2.2.1"
 method = "external-cache"
 location = "/Users/me/Library/Caches/pip/.../numpy-2.2.1.whl"
 status = "ready"
-estimated_seconds = 0.2
+measurement = "read 1.1 GiB/s"
 
 [package.artifact]
 filename = "numpy-2.2.1-cp312-cp312-macosx_14_0_arm64.whl"
@@ -223,8 +224,14 @@ url = "https://files.pythonhosted.org/..."
 | `index-exact` | Exact locked URL, downloaded only during apply and verified by SHA-256. |
 | `index-resolve` | Compatible-mode fallback for the already locked version. |
 
-Automatic ranking minimizes expected time: existing bytes first, compatible
-local environments next, repositories next, and indexes last. The chooser can
+The chooser never prints invented duration estimates. During each plan it
+measures local artifact verification throughput, TCP connection RTT for index
+hosts, and the actual availability-check RTT for repositories. These readings
+appear as values such as `read 1.1 GiB/s`, `RTT 75 ms`, or `RTT unavailable`.
+Because RTT is not transfer bandwidth, pload does not turn it into a fictional
+download duration. Automatic ranking uses locality first and the current
+measurements within each route class: pload cache, adjacent/external artifacts,
+compatible local environments, then repository/index routes. The chooser can
 override it for direct requirements. Transitive requirements use automatic
 ranking so installing `torch` does not ask the user to decide separately for
 `filelock`, `sympy`, and every other implementation detail. If any chosen
@@ -234,6 +241,21 @@ tries another candidate. The selected method is authoritative: choosing
 wheel is already present in pload's cache. Apply then installs all verified
 artifacts locally with networking disabled, so `Processing .../cache/wheels/...`
 is the installation phase rather than evidence that the selected route changed.
+
+### What planning reads and writes
+
+With a current lock, planning only inventories possible routes. It indexes each
+external cache once, inspects only matching-Python environments and only the
+locked package names, checks configured repositories, and measures endpoint
+RTT. The analysis API does not create or overwrite `.pload_plan.toml`.
+Interactive Save/Apply and `--no-ui` persist choices; quitting or `--json` does
+not.
+
+An unpinned configuration with a missing or stale lock has one additional job:
+it must determine exact versions and the transitive graph before routes have a
+meaning. That first resolution reads Simple API pages and independently served
+Core Metadata and updates `.pload_lock.toml`; it still never downloads wheel
+bodies. Later plans reuse the current lock and skip metadata resolution.
 
 ## Current boundaries
 

@@ -99,8 +99,13 @@ def dump_plan(configuration_path, configuration_sha256, lock_sha256, plan):
             f"method = {_quoted(selected.get('method', 'unavailable'))}",
             f"location = {_quoted(selected.get('location', ''))}",
             f"status = {_quoted(selected.get('status', 'unavailable'))}",
-            f"estimated_seconds = {float(selected.get('estimated_seconds', 0.0))}",
         ]
+        if selected.get("measurement"):
+            lines.append(f"measurement = {_quoted(selected['measurement'])}")
+        if selected.get("estimated_seconds") is not None:
+            lines.append(
+                f"estimated_seconds = {float(selected['estimated_seconds'])}"
+            )
         if not selected:
             lines.append(f"reason = {_quoted(reason)}")
         if selected.get("fingerprint"):

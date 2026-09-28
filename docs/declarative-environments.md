@@ -272,11 +272,13 @@ RTT. The analysis API does not create or overwrite `.pload_plan.toml`.
 Interactive Save/Apply, `--no-ui`, and `[plan].mode = "auto"` persist choices;
 quitting or `--json` does not.
 
-`pload apply` first prints the complete persisted plan table. It then prints a
-heading for each exact package, the selected source URL/path/repository, real
-download byte progress for network artifacts, environment creation and
-verification stages. This makes the saved decision and its execution visible in
-one command without allowing apply to recalculate the plan.
+`pload apply` first prints the complete persisted plan table. It then uses
+compact Docker-style progress rows: every exact package starts with its selected
+method in brackets (`[cache]`, `[index-exact]`, `[repository]`, and so on),
+followed by the package, source, progress bar and real byte counts. Redirected
+output uses stable plain-text rows without terminal control characters. This
+makes the saved decision and its execution visible in one command without
+allowing apply to recalculate the plan.
 
 An unpinned configuration with a missing or stale lock has one additional job:
 it must determine exact versions and the transitive graph before routes have a

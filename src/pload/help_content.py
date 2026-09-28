@@ -434,9 +434,9 @@ pload apply --offline
 
 Apply requires a current `.pload_lock.toml` and `.pload_plan.toml`, then installs
 Python when needed. Before changing anything it prints the complete saved plan.
-Execution then prints each `NAME==VERSION` as a heading, its selected source
-URL/path/repository, real network byte progress, and the later install and
-verification stages. It executes each selected route, verifies hashes, creates
+Execution then uses compact Docker-style progress rows. Each package starts with
+its selected method in brackets, followed by `NAME==VERSION`, source, progress
+bar and real network byte counts. It executes each selected route, verifies hashes, creates
 the environment, installs packages and runs `pip check`. It never resolves, tries an
 alternative route, or uploads package bytes. A selected `index-exact` route
 downloads from the locked URL even if the same wheel is already cached; the

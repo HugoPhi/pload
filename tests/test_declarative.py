@@ -687,7 +687,10 @@ def test_describe_plan_apply_through_content_repository(tmp_path, monkeypatch):
     assert output == "42"
     assert target.apply(manifest) == restored
     assert digest(target.cache / artifact["filename"]) == artifact["sha256"]
-    assert any("PACKAGE 1/1 pload-demo==1.0" in item for item in apply_progress)
+    assert any(
+        item.startswith("PACKAGE\t1/1\trepository\tpload-demo==1.0")
+        for item in apply_progress
+    )
     assert any("DONE verified exact requirements" in item for item in apply_progress)
 
 
@@ -853,11 +856,15 @@ def test_apply_downloads_the_exact_url_saved_by_plan(tmp_path, monkeypatch):
     progress = []
     restored = manager.apply(manifest, progress=progress.append)
     assert requested == [artifact_url]
-    assert any(item == "PACKAGE 1/1 pload-demo==1.0" for item in progress)
     assert any(
-        item.startswith(f"SOURCE downloading from {artifact_url}") for item in progress
+        item.startswith("PACKAGE\t1/1\tindex-exact\tpload-demo==1.0")
+        for item in progress
     )
-    assert any(item.startswith("DOWNLOAD ") for item in progress)
+    assert any(
+        item.startswith(f"SOURCE\tpload-demo==1.0\tdownloading from {artifact_url}")
+        for item in progress
+    )
+    assert any(item.startswith("DOWNLOAD\tpload-demo==1.0\t") for item in progress)
     assert execute([
         config.get_pip_command(restored)[0], "-c",
         "import pload_demo; print(pload_demo.answer)",

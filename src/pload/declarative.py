@@ -1539,25 +1539,26 @@ class DeclarativeEnvironmentManager:
             stage = Path(temporary)
             for index_number, package_plan in enumerate(plan["packages"], 1):
                 selected = package_plan["selected"]
+                label = f"{package_plan['name']}=={package_plan['version']}"
+                artifact = selected.get("artifact")
+                size = artifact.get("size", 0) if artifact else 0
                 if progress:
                     progress(
-                        f"PACKAGE {index_number}/{len(plan['packages'])} "
-                        f"{package_plan['name']}=={package_plan['version']}"
+                        f"PACKAGE\t{index_number}/{len(plan['packages'])}\t"
+                        f"{selected['method']}\t{label}\t{size}"
                     )
                 if offline and selected["method"] in {"index-exact", "index-resolve"}:
                     raise PloadError(
                         f"offline apply forbids the selected network route for "
                         f"{package_plan['name']}=={package_plan['version']}"
                     )
-                artifact = selected.get("artifact")
                 if artifact:
                     cached = self.cache / artifact["filename"]
-                    label = f"{package_plan['name']}=={package_plan['version']}"
                     method = selected["method"]
                     if method == "cache":
                         source = Path(selected["location"])
                         if progress:
-                            progress(f"SOURCE using cache {source}")
+                            progress(f"SOURCE\t{label}\tusing cache {source}")
                         if not source.is_file() or digest(source) != artifact["sha256"]:
                             raise PloadError(
                                 f"planned route failed for {label} (cache): "
@@ -1566,7 +1567,6 @@ class DeclarativeEnvironmentManager:
                             )
                         install_artifact = source
                     else:
-                        size = artifact.get("size")
                         size_note = f" ({_human_size(size)})" if size else ""
                         if method == "index-exact":
                             source_description = artifact.get("url") or data[
@@ -1583,7 +1583,8 @@ class DeclarativeEnvironmentManager:
                             action = "copying from"
                         if progress:
                             progress(
-                                f"SOURCE {action} {source_description}{size_note}"
+                                f"SOURCE\t{label}\t{action} "
+                                f"{source_description}{size_note}"
                             )
                         acquired_dir = stage / f"artifact-{index_number}"
                         acquired_dir.mkdir()
@@ -1609,11 +1610,13 @@ class DeclarativeEnvironmentManager:
                         install_artifact.resolve().as_uri()
                         + "#sha256=" + artifact["sha256"]
                     )
+                    if progress:
+                        progress(f"PACKAGE_DONE\t{label}\tverified")
                 else:
                     if selected["method"] == "environment-copy":
                         if progress:
                             progress(
-                                f"SOURCE copying installed package from "
+                                f"SOURCE\t{label}\tcopying installed package from "
                                 f"{selected['location']}"
                             )
                         environment_copies.append(package_plan)
@@ -1621,7 +1624,7 @@ class DeclarativeEnvironmentManager:
                         source = data.get("sources", {}).get(selected["location"], {})
                         if progress:
                             progress(
-                                f"SOURCE downloading from "
+                                f"SOURCE\t{label}\tdownloading from "
                                 f"{source.get('url', selected['location'])}"
                             )
                         compatible.append(package_plan)
@@ -1641,6 +1644,11 @@ class DeclarativeEnvironmentManager:
                             capture=False)
                 for package_plan in environment_copies:
                     self._copy_distribution(package_plan, env, stage)
+                    if progress:
+                        progress(
+                            f"PACKAGE_DONE\t{package_plan['name']}=="
+                            f"{package_plan['version']}\tcopied"
+                        )
                 for package_plan in compatible:
                     source_name = package_plan["selected"]["location"]
                     source = data.get("sources", {}).get(source_name, {})
@@ -1652,6 +1660,11 @@ class DeclarativeEnvironmentManager:
                     execute(command + [
                         f"{package_plan['name']}=={package_plan['version']}"
                     ], capture=False)
+                    if progress:
+                        progress(
+                            f"PACKAGE_DONE\t{package_plan['name']}=="
+                            f"{package_plan['version']}\tinstalled"
+                        )
                 requirements = stage / "requirements.txt"
                 requirements.write_text(
                     "".join(
@@ -1895,12 +1908,16 @@ with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as bundle:
                                 received - last_reported >= 8 * 1024 * 1024
                                 or (expected and received >= expected)
                             ):
-                                total = f" / {_human_size(expected)}" if expected else ""
-                                progress(f"DOWNLOAD {_human_size(received)}{total}")
+                                progress(
+                                    f"DOWNLOAD\t{package['name']}=={package['version']}\t"
+                                    f"{received}\t{expected or 0}"
+                                )
                                 last_reported = received
                         if progress and received != last_reported:
-                            total = f" / {_human_size(expected)}" if expected else ""
-                            progress(f"DOWNLOAD {_human_size(received)}{total}")
+                            progress(
+                                f"DOWNLOAD\t{package['name']}=={package['version']}\t"
+                                f"{received}\t{expected or 0}"
+                            )
                 except OSError as exc:
                     raise PloadError(f"cannot download planned artifact: {exc}") from exc
                 if digest(temporary) != artifact["sha256"]:

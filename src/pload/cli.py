@@ -7,6 +7,7 @@ from pathlib import Path
 from questionary import Choice
 from rich import box
 from rich.panel import Panel
+from rich.progress import BarColumn, Progress, TextColumn
 from rich.table import Table
 from rich.text import Text
 
@@ -531,30 +532,104 @@ def print_declarative_plan(plan):
         console.print("[dim]Acquisition choices were not saved.[/]")
 
 
-def print_apply_progress(message, output=None):
-    """Render durable, package-oriented apply output instead of one opaque spinner."""
-    console = output or ui.console()
-    kind, _, detail = str(message).partition(" ")
-    if kind == "PACKAGE":
-        counter, _, package = detail.partition(" ")
-        console.print()
-        line = Text("▶ ", style="bold cyan")
-        line.append(package, style="bold white")
-        line.append(f"  {counter}", style="dim")
-        console.print(line)
-    elif kind == "SOURCE":
-        line = Text("  ↳ ", style="green")
-        line.append(detail, style="white")
-        console.print(line)
-    elif kind == "DOWNLOAD":
-        console.print(Text(f"    downloaded {detail}", style="cyan"))
-    elif kind == "STAGE":
-        console.print()
-        console.print(Text(f"▶ {detail}", style="bold cyan"))
-    elif kind == "DONE":
-        ui.success(detail, output=console)
-    else:
-        console.print(message)
+def _progress_size(value):
+    size = float(value or 0)
+    for unit in ("B", "KiB", "MiB", "GiB"):
+        if size < 1024 or unit == "GiB":
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+
+
+class ApplyProgress:
+    """Docker-like persistent package rows with a plain-text CI fallback."""
+
+    def __init__(self, output=None):
+        self.console = output or ui.console()
+        self.interactive = self.console.is_terminal
+        self.tasks = {}
+        self.details = {}
+        self.progress = Progress(
+            TextColumn("{task.fields[tag]}", style="bold cyan", markup=False),
+            TextColumn("{task.fields[package]}", style="bold white", markup=False),
+            BarColumn(bar_width=18, complete_style="green", finished_style="green"),
+            TextColumn("{task.fields[amount]}", style="cyan", markup=False),
+            TextColumn("{task.fields[status]}", style="dim", markup=False),
+            console=self.console,
+            transient=False,
+        )
+
+    def __enter__(self):
+        if self.interactive:
+            self.progress.start()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        if self.interactive:
+            self.progress.stop()
+
+    def __call__(self, message):
+        parts = str(message).split("\t")
+        kind = parts[0].split(" ", 1)[0]
+        if kind == "PACKAGE":
+            _, counter, method, package, size = parts
+            total = int(size) or 1
+            detail = {
+                "tag": f"[{method}]",
+                "package": package,
+                "counter": counter,
+                "method": method,
+                "total": total,
+            }
+            self.details[package] = detail
+            if self.interactive:
+                self.tasks[package] = self.progress.add_task(
+                    package, total=total, tag=detail["tag"], package=package,
+                    amount="", status="waiting",
+                )
+        elif kind == "SOURCE":
+            _, package, status = parts
+            self.details[package]["status"] = status
+            if self.interactive:
+                self.progress.update(self.tasks[package], status=status)
+            else:
+                detail = self.details[package]
+                self.console.print(
+                    Text(f"{detail['tag']:<24} {package}  {status}")
+                )
+        elif kind == "DOWNLOAD":
+            _, package, received, expected = parts
+            received, expected = int(received), int(expected)
+            detail = self.details[package]
+            total = expected or detail["total"]
+            amount = _progress_size(received)
+            if total > 1:
+                amount += f" / {_progress_size(total)}"
+            if self.interactive:
+                self.progress.update(
+                    self.tasks[package], completed=received, total=total,
+                    amount=amount, status="downloading",
+                )
+            else:
+                self.console.print(Text(f"{detail['tag']:<24} {package}  {amount}"))
+        elif kind == "PACKAGE_DONE":
+            _, package, status = parts
+            detail = self.details[package]
+            if self.interactive:
+                task = self.progress.tasks[self.tasks[package]]
+                self.progress.update(
+                    self.tasks[package], completed=task.total,
+                    amount=task.fields.get("amount", ""), status=status,
+                )
+            elif "status" not in detail:
+                self.console.print(Text(f"{detail['tag']:<24} {package}  {status}"))
+        elif kind == "STAGE":
+            _, _, detail = str(message).partition(" ")
+            self.console.print(Text(f"▶ {detail}", style="bold cyan"))
+        elif kind == "DONE":
+            _, _, detail = str(message).partition(" ")
+            ui.success(detail, output=self.console)
+        else:
+            self.console.print(message)
 
 
 def choose_declarative_routes(plan):
@@ -976,21 +1051,21 @@ def run(argv=None):
                     plan["saved"] = True
                 print_declarative_plan(plan)
                 if action == "apply":
-                    restored = manager.apply(
-                        args.file, offline=args.offline,
-                        progress=lambda message: print_apply_progress(
-                            message, chooser_console
-                        ),
-                    )
+                    with ApplyProgress(chooser_console) as apply_progress:
+                        restored = manager.apply(
+                            args.file, offline=args.offline,
+                            progress=apply_progress,
+                        )
                     chooser_console.print(restored)
         else:
             apply_console = ui.console()
             saved_plan = manager.saved_plan(args.file)
             print_declarative_plan(saved_plan)
-            restored = manager.apply(
-                args.file, args.name, args.offline,
-                progress=lambda message: print_apply_progress(message, apply_console),
-            )
+            with ApplyProgress(apply_console) as apply_progress:
+                restored = manager.apply(
+                    args.file, args.name, args.offline,
+                    progress=apply_progress,
+                )
             print(restored)
         return 0
 

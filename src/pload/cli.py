@@ -4,13 +4,14 @@ import re
 import sys
 from pathlib import Path
 
+from questionary import Choice
 from rich import box
-from rich.console import Console
 from rich.panel import Panel
+from rich.progress import BarColumn, Progress, TextColumn
 from rich.table import Table
 from rich.text import Text
 
-from pload import __version__
+from pload import __version__, ui
 from pload.display import print_environment_table, print_python_table
 from pload.errors import PloadError
 from pload.help_content import render_detailed_help
@@ -28,6 +29,12 @@ COMMAND_ALIASES = {
     "shell-init": ("shell",),
     "python": ("py",),
     "config": ("cfg",),
+    "describe": (),
+    "lock": (),
+    "plan": (),
+    "apply": (),
+    "repo": (),
+    "remote": (),
 }
 PYTHON_ALIASES = {
     "install": (),
@@ -49,7 +56,7 @@ DETAIL_FLAGS = {"-d", "--detailed", "--details"}
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(
+    parser = ui.ArgumentParser(
         prog="pload",
         description=(
             "Create, activate, and remove Python virtual environments without tying "
@@ -276,12 +283,95 @@ Aliases: system=sys, managed=uv""",
     )
     config.add_argument("key", nargs="?", help="setting name for `config set`")
     config.add_argument("value", nargs="?", help="new value for `config set`")
+    describe = subparsers.add_parser(
+        "describe", description="Describe an existing environment as one portable configuration.",
+        help="create pload.toml from an existing environment",
+    )
+    describe.add_argument("source", help="environment ID, name, path, or Python executable")
+    describe.add_argument("--output", "-o", default="pload.toml",
+                          help="configuration file to write (default: pload.toml)")
+    describe.add_argument("--name", "-n", help="logical environment name")
+    describe.add_argument("--mode", "-m", choices=["exact", "compatible"], default="exact",
+                          help="lock exact artifacts or permit re-resolution (default: exact)")
+    describe.add_argument("--repository", "-r",
+                          help="artifact repository; defaults to the first configured local/SSH repo")
+    describe.add_argument(
+        "--source", "-s", dest="package_sources", action="append", default=[],
+        metavar="PACKAGE=URL",
+        help="package-specific index; repeat for packages such as CUDA-enabled torch",
+    )
+    lock = subparsers.add_parser(
+        "lock", description="Resolve dependencies and write the managed environment lock.",
+        help="resolve and write .pload_lock.toml",
+    )
+    lock.add_argument("file", nargs="?", default="pload.toml",
+                      help="environment configuration (default: pload.toml)")
+    lock.add_argument("--offline", "-o", action="store_true",
+                      help="use only already available resolver resources")
+    plan = subparsers.add_parser(
+        "plan", description="Compare a declarative environment with all available resources.",
+        help="explain how pload would satisfy a configuration",
+    )
+    plan.add_argument("file", nargs="?", default="pload.toml",
+                      help="environment configuration (default: pload.toml)")
+    plan.add_argument("--offline", "-o", action="store_true",
+                      help="plan using only resources available without the internet")
+    plan.add_argument("--json", "-j", action="store_true", help="emit machine-readable JSON")
+    plan.add_argument(
+        "--no-ui", "-N", action="store_true",
+        help="save recommended measured routes without opening the interactive chooser",
+    )
+    apply = subparsers.add_parser(
+        "apply", description="Materialize the desired environment from available resources.",
+        help="create or verify an environment from pload.toml",
+    )
+    apply.add_argument("file", nargs="?", default="pload.toml",
+                       help="environment configuration (default: pload.toml)")
+    apply_target = apply.add_mutually_exclusive_group()
+    apply_target.add_argument(
+        "--name", "-n", help="override the managed environment name"
+    )
+    apply_target.add_argument(
+        "--local", "-l", action="store_true",
+        help="create .venv beside the configuration file",
+    )
+    apply.add_argument("--offline", "-o", action="store_true",
+                       help="forbid internet access; configured local/SSH repositories remain usable")
+    repo = subparsers.add_parser("repo", help="manage resource providers",
+                                 description="Manage local and SSH artifact providers.")
+    actions = repo.add_subparsers(dest="repo_command", required=True)
+    add = actions.add_parser("add", description="Save a repository location; no credentials stored.")
+    add.add_argument("name", help="repository nickname")
+    add.add_argument("location", help="directory or HOST:/absolute/path")
+    add.add_argument("--type", "-t", choices=["local", "ssh"], default="local",
+                     help="transport (default: local)")
+    actions.add_parser("list", aliases=["ls"], description="Show configured repositories.")
+    remove = actions.add_parser("remove", description="Remove configuration, keeping all remote files.")
+    remove.add_argument("name", help="repository nickname")
+    remote = subparsers.add_parser(
+        "remote", help="explicitly back up installed package artifacts",
+        description="Search or store package artifacts in configured local/SSH repositories.",
+    )
+    remote_actions = remote.add_subparsers(dest="remote_command", required=True)
+    remote_add = remote_actions.add_parser(
+        "add", description="Back up one installed package wheel; never runs during apply.",
+    )
+    remote_add.add_argument("package", help="installed package name or exact NAME==VERSION")
+    remote_add.add_argument("--from", "-f", dest="environment", default=".",
+                            help="source environment ID, name, or path (default: .)")
+    remote_add.add_argument("--remote", "-r", dest="repository",
+                            help="configured repository name (default: first configured)")
+    remote_add.add_argument("--index", "-i", help="index used only if no original wheel is cached")
     return parser
 
 
 def add_packages(parser):
     parser.add_argument("--channel", "-c", help="Python package index URL")
     parser.add_argument("--requirements", "-r", nargs="+", help="packages to install")
+    parser.add_argument(
+        "--package-strategy", "-s", choices=["auto", "custom"],
+        help="choose package sources automatically or interactively (default: auto)",
+    )
 
 
 def _set_config_value(config, key, value):
@@ -393,6 +483,245 @@ def _global_options_table(root_parser):
     return table
 
 
+def print_declarative_plan(plan):
+    console = ui.console()
+    if plan["lock"]["required"]:
+        console.print(
+            f"[bold yellow]Lock: {plan['lock']['status']}[/] · metadata was unavailable "
+            "offline; run [bold green]pload plan[/] with network access"
+        )
+    python = plan["python"]
+    ui.heading(
+        f"Plan · {plan['name']}",
+        f"Python {python['method']} · {python['status']} · "
+        f"{plan.get('planning_mode', 'interactive')} planning",
+        output=console,
+    )
+    console.print(f"[dim]{python['location']}[/]", overflow="ellipsis", no_wrap=True)
+    table = ui.table(
+        ("PACKAGE", "bold", {"width": 15, "overflow": "ellipsis", "no_wrap": True}),
+        ("VERSION", "yellow", {"width": 10, "no_wrap": True}),
+        ("SOURCE", "cyan", {"width": 12, "overflow": "ellipsis", "no_wrap": True}),
+        ("STATUS", "", {"width": 10, "no_wrap": True}),
+        ("RESOURCE", "dim", {"min_width": 14, "ratio": 1,
+                              "overflow": "ellipsis", "no_wrap": True}),
+        expand=True,
+    )
+    direct_packages = [
+        package for package in plan["packages"] if package.get("direct", True)
+    ]
+    transitive_count = len(plan["packages"]) - len(direct_packages)
+    for package in direct_packages:
+        selected = package["selected"]
+        if selected:
+            table.add_row(package["name"], package["version"], selected["method"],
+                          selected["status"], selected["location"])
+        else:
+            rejected = package.get("rejections", [])
+            if rejected:
+                table.add_row(package["name"], package["version"], "—", "incompatible",
+                              rejected[0]["artifact"])
+            else:
+                table.add_row(package["name"], package["version"], "—", "unavailable",
+                              "No resource satisfies the configuration")
+    console.print(table)
+    if transitive_count:
+        console.print(
+            f"[dim]+ {transitive_count} transitive dependencies planned "
+            "automatically using their lowest-cost valid routes[/]"
+        )
+    if plan.get("saved"):
+        console.print(
+            "[dim]Saved acquisition choices:[/] "
+            f"[cyan]{plan['plan_path']}[/]"
+        )
+    else:
+        console.print("[dim]Acquisition choices were not saved.[/]")
+
+
+def _progress_size(value):
+    size = float(value or 0)
+    for unit in ("B", "KiB", "MiB", "GiB"):
+        if size < 1024 or unit == "GiB":
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+
+
+class ApplyProgress:
+    """Persistent Rich progress rows with a plain-text CI fallback."""
+
+    def __init__(self, output=None):
+        self.console = output or ui.console()
+        self.interactive = self.console.is_terminal
+        self.tasks = {}
+        self.details = {}
+        self.progress = Progress(
+            TextColumn("{task.fields[tag]}", style="bold cyan", markup=False),
+            TextColumn("{task.fields[package]}", style="bold white", markup=False),
+            TextColumn("[", style="dim", markup=False),
+            BarColumn(
+                bar_width=None,
+                style="grey23",
+                complete_style="green",
+                finished_style="green",
+            ),
+            TextColumn("]", style="dim", markup=False),
+            TextColumn("{task.fields[amount]}", style="cyan", markup=False),
+            console=self.console,
+            transient=False,
+            expand=True,
+            refresh_per_second=30,
+        )
+
+    def __enter__(self):
+        if self.interactive:
+            self.progress.start()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        if self.interactive:
+            self.progress.stop()
+
+    def __call__(self, message):
+        parts = str(message).split("\t")
+        kind = parts[0].split(" ", 1)[0]
+        if kind == "PACKAGE":
+            _, counter, method, package, size = parts
+            total = int(size) or 1
+            detail = {
+                "tag": f"[{method}]",
+                "package": package,
+                "counter": counter,
+                "method": method,
+                "total": total,
+                "last_plain_received": 0,
+            }
+            self.details[package] = detail
+            if self.interactive:
+                self.tasks[package] = self.progress.add_task(
+                    package, total=total, tag=detail["tag"], package=package,
+                    amount="", status="waiting",
+                )
+        elif kind == "SOURCE":
+            _, package, status = parts
+            self.details[package]["status"] = status
+            if self.interactive:
+                self.progress.update(self.tasks[package], status=status)
+        elif kind == "DOWNLOAD":
+            _, package, received, expected = parts
+            received, expected = int(received), int(expected)
+            detail = self.details[package]
+            total = expected or detail["total"]
+            amount = _progress_size(received)
+            if total > 1:
+                amount += f" / {_progress_size(total)}"
+            if self.interactive:
+                self.progress.update(
+                    self.tasks[package], completed=received, total=total,
+                    amount=amount, status="downloading",
+                )
+            else:
+                final = expected and received >= expected
+                if (final or received - detail["last_plain_received"]
+                        >= 8 * 1024 * 1024):
+                    self.console.print(Text(
+                        f"{detail['tag']:<24} {package}  {amount}"
+                    ))
+                    detail["last_plain_received"] = received
+        elif kind == "PACKAGE_DONE":
+            _, package, status = parts
+            detail = self.details[package]
+            if self.interactive:
+                task = self.progress.tasks[self.tasks[package]]
+                self.progress.update(
+                    self.tasks[package], completed=task.total,
+                    amount=task.fields.get("amount", ""), status=status,
+                )
+            elif "status" not in detail:
+                self.console.print(Text(f"{detail['tag']:<24} {package}  {status}"))
+        elif kind == "STAGE":
+            _, _, detail = str(message).partition(" ")
+            self.console.print(Text(f"▶ {detail}", style="bold cyan"))
+        elif kind == "DONE":
+            _, _, detail = str(message).partition(" ")
+            ui.success(detail, output=self.console)
+        else:
+            self.console.print(message)
+
+
+def choose_declarative_routes(plan):
+    """Choose direct-package routes with familiar cursor-key menus."""
+    from pload.resource_plan import PlanSelection
+
+    console = ui.console()
+    selection = PlanSelection(plan)
+    decision_indices = selection.decision_indices()
+    if not decision_indices:
+        return "save"
+    cursor = 0
+    while True:
+        packages = plan["packages"]
+        package_index = decision_indices[cursor]
+        package = packages[package_index]
+        routes = selection.routes(package_index)
+        ui.heading(
+            f"Choose source · {package['name']}=={package['version']}",
+            f"Direct requirement {cursor + 1}/{len(decision_indices)} · "
+            f"{len(packages) - len(decision_indices)} dependencies handled automatically",
+            output=console,
+        )
+        choices = []
+        for index, route in enumerate(routes, 1):
+            measurement = route.get("measurement", "not measured")
+            recommended = "  recommended" if index == 1 else ""
+            choices.append(Choice(
+                f"{route['method']:<18} {measurement:<20} "
+                f"{route['location']}{recommended}",
+                value=("route", index - 1),
+            ))
+        if not choices:
+            ui.warning(f"No valid source is available for {package['name']}")
+            return "quit"
+        actions = {
+            "p": ("previous", None),
+            "n": ("next", None),
+            "u": ("undo", None),
+            "r": ("reset", None),
+            "s": ("save", None),
+            "a": ("apply", None),
+            "q": ("quit", None),
+        }
+        console.print(
+            "[dim]p previous · n next · u undo · r reset · "
+            "s save · a apply · q quit[/]"
+        )
+        command, value = ui.select(
+            "Select an acquisition source",
+            choices,
+            default=("route", 0) if routes else ("quit", None),
+            instruction=ui.navigation_hint("choose"),
+            hotkeys=actions,
+        )
+        if command == "route":
+            selection.select(package_index, value)
+            if cursor < len(decision_indices) - 1:
+                cursor += 1
+        elif command == "next":
+            cursor = min(cursor + 1, len(decision_indices) - 1)
+        elif command == "previous":
+            cursor = max(cursor - 1, 0)
+        elif command == "undo":
+            selection.undo()
+        elif command == "reset":
+            selection.reset()
+        elif command == "save":
+            return "save"
+        elif command == "apply":
+            return "apply"
+        elif command == "quit":
+            return "quit"
+
+
 def _print_spaced_section(console, renderable):
     """Give a standalone section consistent visual breathing room."""
     console.print()
@@ -412,10 +741,11 @@ def _print_arrow_table(console, title, table):
 
 
 def _brief_help(parser, command_path, root_parser=None):
-    console = Console(highlight=False)
+    console = ui.console()
     title = f"pload {__version__}" if not command_path else "pload " + " ".join(command_path)
     description = parser.description or "Command-line help"
     usage = " ".join(parser.format_usage().split())
+    usage = re.sub(r"\{[^}]+\} \.\.\.", "<COMMAND>", usage)
     if command_path and usage.startswith(f"usage: {parser.prog}"):
         usage = usage.replace(
             f"usage: {parser.prog}",
@@ -463,10 +793,16 @@ def _brief_help(parser, command_path, root_parser=None):
             "path": "Print an environment path",
             "config": "Show effective configuration",
             "shell-init": "Print shell activation integration",
+            "describe": "Write one portable configuration for an existing environment",
+            "lock": "Resolve dependencies into .pload_lock.toml",
+            "plan": "Compare a configuration with available resources",
+            "apply": "Materialize the environment declared by pload.toml",
+            "repo": "Manage local and SSH artifact providers",
+            "remote": "Explicitly back up installed package artifacts",
         }
-        for command in ("new", "init", "list", "rm", "python", "path", "config", "shell-init"):
+        for command, summary in summaries.items():
             aliases = COMMAND_ALIASES[command]
-            table.add_row(command, ", ".join(aliases) if aliases else "—", summaries[command])
+            table.add_row(command, ", ".join(aliases) if aliases else "—", summary)
         console.print(table)
         console.print("[bold cyan]Quick start[/]")
         console.print("  [green]pload new[/]  [dim]# guided creation[/]")
@@ -525,22 +861,18 @@ def render_help(argv):
 
 def render_landing():
     """Show the no-argument welcome screen and the smallest useful command tour."""
-    console = Console(highlight=False)
-    art = Text(
-        """   ____  _                 _
-  |  _ \\| | ___   __ _  __| |
-  | |_) | |/ _ \\ / _` |/ _` |
-  |  __/| | (_) | (_| | (_| |
-  |_|   |_|\\___/ \\__,_|\\__,_|""",
-        style="bold cyan",
-    )
-    console.print(art)
+    console = ui.console()
+    ui.logo(output=console)
     console.print(f"[bold white]pload {__version__}[/]  [dim]Python environments, kept simple.[/]")
     table = Table(box=box.SIMPLE, header_style="bold cyan", show_edge=False)
     table.add_column("COMMAND", style="bold green", no_wrap=True)
     table.add_column("WHAT IT DOES")
     table.add_row("pload cfg", "Show where pload stores its data")
     table.add_row("pload python list", "Find every usable Python interpreter")
+    table.add_row("pload describe v1", "Describe an environment in pload.toml")
+    table.add_row("pload plan", "Resolve metadata and choose package routes")
+    table.add_row("pload apply", "Execute exactly the saved package routes")
+    table.add_row("pload remote add torch -f v1 -r lab", "Explicitly back up one wheel")
     table.add_row("pload new", "Open guided environment creation")
     table.add_row("pload new -n data -v 3.12", "Create a named virtual environment")
     table.add_row("pload list", "List environments, IDs, and descriptions")
@@ -554,7 +886,7 @@ def shell_script(shell):
     if shell in {"bash", "zsh"}:
         return r'''pload() {
     case "${1:-}" in
-        ""|new|init|i|rm|remove|del|delete|list|ls|path|p|shell-init|shell|python|py|config|cfg|-*)
+        ""|new|init|i|rm|remove|del|delete|list|ls|path|p|shell-init|shell|python|py|config|cfg|describe|lock|plan|apply|repo|-*)
             command pload "$@"
             ;;
         *)
@@ -567,7 +899,7 @@ def shell_script(shell):
     if shell == "fish":
         return r'''function pload
     switch "$argv[1]"
-        case '' new init i rm remove del delete list ls path p shell-init shell python py config cfg '-*'
+        case '' new init i rm remove del delete list ls path p shell-init shell python py config cfg describe lock plan apply repo '-*'
             command pload $argv
         case '*'
             set -l name .
@@ -581,7 +913,7 @@ def shell_script(shell):
 end'''
     return r'''function pload {
     param([Parameter(ValueFromRemainingArguments = $true)][string[]]$PloadArgs)
-    $commands = @('new', 'init', 'i', 'rm', 'remove', 'del', 'delete', 'list', 'ls', 'path', 'p', 'shell-init', 'shell', 'python', 'py', 'config', 'cfg', '-h', '--help', '--version')
+    $commands = @('new', 'init', 'i', 'rm', 'remove', 'del', 'delete', 'list', 'ls', 'path', 'p', 'shell-init', 'shell', 'python', 'py', 'config', 'cfg', 'describe', 'lock', 'plan', 'apply', 'repo', '-h', '--help', '--version')
     $backend = Get-Command -Name @('pload.exe', 'pload.cmd') -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $backend) { throw 'pload executable not found on PATH' }
     if ($PloadArgs.Count -eq 0) {
@@ -600,36 +932,60 @@ end'''
 
 def _guided_new(config):
     """Collect useful creation choices when ``pload new`` is run by itself."""
-    console = Console(highlight=False)
-    console.print(Panel.fit(
-        "Choose an interpreter and an optional name. Press Enter to accept defaults.",
-        title="[bold cyan]Guided environment creation[/]",
-        border_style="blue",
-    ))
+    console = ui.console()
+    ui.heading(
+        "Create an environment",
+        "Review each value, then create. Nothing is changed until the final step.",
+        output=console,
+    )
     runtimes = PythonManager(config).discover()
     if runtimes:
-        console.print("[dim]Use a Python ID, alias, version, or interpreter path:[/]")
-        print_python_table(runtimes)
+        runtime_choices = [
+            Choice(
+                f"{runtime.id or '—':<5} {runtime.version:<10} "
+                f"{runtime.source:<10} {runtime.path}",
+                value=runtime.id or runtime.alias or str(runtime.path),
+            )
+            for runtime in runtimes
+        ]
+        runtime_choices.append(Choice("Enter a version or path…", value="__custom__"))
+        version = ui.select(
+            "Python interpreter",
+            runtime_choices,
+            default=runtime_choices[0].value,
+        )
+        if version == "__custom__":
+            version = ui.text("Python version or executable path", default="current")
     else:
         console.print("[yellow]No Python was discovered; the current Python is the default.[/]")
-
-    def ask(label, default=""):
-        suffix = f" [{default}]" if default else ""
-        value = input(f"{label}{suffix}: ").strip()
-        return value or default
-
-    version = ask("Python ID, alias, version, or path", "current")
+        version = "current"
     _, suggested_name = config.resolve_venv_path(version=version)
-    name = ask("Environment name (blank generates one)")
-    if not name:
-        console.print(f"[dim]Generated name: [bold]{suggested_name}[/][/dim]")
-    description = ask("Description (optional)")
-    packages = ask("Packages, separated by spaces (optional)")
+    name = ui.text("Environment name", default=suggested_name)
+    description = ui.text("Description (optional)")
+    packages = ui.text("Packages, separated by spaces (optional)")
+    requirements = packages.split() or None
+    package_strategy = None
+    if requirements:
+        package_strategy = ui.select(
+            "Package source strategy",
+            [
+                Choice(
+                    "Automatic  prefer compatible cache, then the configured index",
+                    value="auto",
+                ),
+                Choice(
+                    "Custom     choose a source for each package",
+                    value="custom",
+                ),
+            ],
+            default="auto",
+        )
     return {
         "python_version": version,
-        "name": name or None,
+        "name": name,
         "description": description or None,
-        "requirements": packages.split() or None,
+        "requirements": requirements,
+        "package_strategy": package_strategy,
     }
 
 
@@ -647,20 +1003,113 @@ def run(argv=None):
     venvs = VenvManager(config)
     dependencies = DependencyManager(config)
 
+    if command in {"describe", "lock", "plan", "apply", "repo", "remote"}:
+        if command == "repo":
+            from pload.snapshots import RepositoryManager
+
+            repositories = RepositoryManager(config)
+            if args.repo_command == "add":
+                repositories.add(args.name, args.location, args.type)
+            elif args.repo_command == "remove":
+                repositories.remove(args.name)
+            else:
+                print(json.dumps(repositories.repositories(), indent=2))
+            return 0
+        from pload.declarative import DeclarativeEnvironmentManager
+
+        manager = DeclarativeEnvironmentManager(config)
+        if command == "remote":
+            result = manager.publish_package(
+                args.package, args.environment, args.repository, args.index,
+            )
+            ui.success(
+                f"Backed up {result['package']}=={result['version']} "
+                f"to {result['repository']}",
+                detail=f"{result['filename']} · sha256:{result['sha256']}",
+            )
+        elif command == "describe":
+            progress_console = ui.console()
+            print(manager.describe(
+                args.source, args.output, args.name, args.mode, args.repository,
+                args.package_sources,
+                progress=lambda message: progress_console.print(
+                    Text("• " + message, style="cyan")
+                ),
+            ))
+        elif command == "lock":
+            with ui.status("Reading configuration…") as update_status:
+                result = manager.lock(
+                    args.file, args.offline,
+                    progress=lambda message: update_status(f"{message}…"),
+                )
+            count = len(result["resolved"])
+            action = "Wrote" if result["updated"] else "Reused"
+            ui.success(
+                f"{action} {count} locked packages",
+                detail=str(result["path"]),
+            )
+        elif command == "plan":
+            if args.json:
+                plan = manager.plan(args.file, args.offline)
+                print(json.dumps(plan, ensure_ascii=False, indent=2))
+            else:
+                with ui.status("Reading configuration and available resources…") as update_status:
+                    plan = manager.plan(
+                        args.file, args.offline,
+                        progress=lambda message: update_status(f"{message}…"),
+                    )
+                action = "save"
+                chooser_console = ui.console()
+                if (chooser_console.is_terminal and not args.no_ui
+                        and plan.get("planning_mode") != "auto"):
+                    action = choose_declarative_routes(plan)
+                if action != "quit":
+                    plan["plan_path"] = str(manager.save_plan(args.file, plan))
+                    plan["saved"] = True
+                print_declarative_plan(plan)
+                if action == "apply":
+                    with ApplyProgress(chooser_console) as apply_progress:
+                        restored = manager.apply(
+                            args.file, offline=args.offline,
+                            progress=apply_progress,
+                        )
+                    chooser_console.print(restored)
+        else:
+            apply_console = ui.console()
+            saved_plan = manager.saved_plan(args.file)
+            print_declarative_plan(saved_plan)
+            target = None
+            if args.local:
+                target = Path(args.file).expanduser().resolve().parent / ".venv"
+            with ApplyProgress(apply_console) as apply_progress:
+                restored = manager.apply(
+                    args.file, args.name, args.offline,
+                    target=target,
+                    progress=apply_progress,
+                )
+            print(restored)
+        return 0
+
     if command == "new":
-        if not any((args.python_version, args.name, args.path, args.description, args.requirements, args.channel)):
+        if not any((
+            args.python_version, args.name, args.path, args.description,
+            args.requirements, args.channel, args.package_strategy,
+        )):
             guided = _guided_new(config)
             args.python_version = guided["python_version"]
             args.name = guided["name"]
             args.description = guided["description"]
             args.requirements = guided["requirements"]
+            args.package_strategy = guided["package_strategy"]
         path = venvs.create_venv(
             version=args.python_version,
             target=args.path,
             name=args.name,
             description=args.description,
         )
-        dependencies.install_dependencies(path, args.requirements, args.channel)
+        dependencies.install_dependencies(
+            path, args.requirements, args.channel, args.package_strategy or "auto",
+        )
         return 0
 
     if command == "init":
@@ -673,7 +1122,9 @@ def run(argv=None):
             target=args.venv_dir,
             description=args.description,
         )
-        dependencies.install_dependencies(path, args.requirements, args.channel)
+        dependencies.install_dependencies(
+            path, args.requirements, args.channel, args.package_strategy or "auto",
+        )
         return 0
 
     if command == "rm":
@@ -684,11 +1135,15 @@ def run(argv=None):
             names = list(dict.fromkeys(names))
         if not names:
             raise PloadError("no environments selected")
+        if not args.yes:
+            ui.heading("Remove environments", "\n".join(f"  {name}" for name in names))
+            if not ui.confirm(
+                f"Remove {len(names)} environment{'s' if len(names) != 1 else ''}?",
+                default=False,
+            ):
+                ui.warning("Removal cancelled")
+                return 0
         for name in names:
-            if not args.yes:
-                confirmation = input(f"Remove {name!r}? Type its name to confirm: ")
-                if confirmation != name:
-                    raise PloadError("removal cancelled")
             venvs.remove_venv(name, project_dir=args.project_dir)
         return 0
 
@@ -741,7 +1196,7 @@ def run(argv=None):
             if not args.key or args.value is None:
                 raise PloadError("usage: pload cfg set SETTING VALUE")
             path = _set_config_value(config, args.key, args.value)
-            print(f"[*] Updated configuration: {path}")
+            ui.success("Updated configuration", detail=str(path))
             return 0
         effective = dict(config.settings)
         effective.update({
@@ -759,8 +1214,11 @@ def run(argv=None):
 def main(argv=None):
     try:
         return run(argv)
-    except (PloadError, PythonNotFoundError, re.error) as exc:
-        print(f"pload: error: {exc}", file=sys.stderr)
+    except (KeyboardInterrupt, EOFError):
+        ui.warning("Cancelled")
+        return 130
+    except (PloadError, PythonNotFoundError, re.error, OSError) as exc:
+        ui.error(str(exc))
         return 1
 
 

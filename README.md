@@ -13,6 +13,7 @@ complete parameter reference and `-h -d` for practical examples and effects.
 ## Contents
 
 - [Install](#install)
+- [Reproduce and share environments](#reproduce-and-share-environments)
 - [Upgrade](#upgrade)
 - [First run](#first-run)
 - [Configure later](#configure-later)
@@ -20,9 +21,11 @@ complete parameter reference and `-h -d` for practical examples and effects.
 - [Discover and install Python](#discover-and-install-python)
 - [Create and activate environments](#create-and-activate-environments)
 - [Help and aliases](#help-and-aliases)
+- [Terminal experience](#terminal-experience)
 - [Isolation and directory layout](#isolation-and-directory-layout)
 - [Command reference](#command-reference)
 - [Development](#development)
+- [License](#license)
 
 ## Install
 
@@ -50,10 +53,11 @@ pipx install pload
 pload-install
 ```
 
-The installer uses colored numbered choices for the pload data directory,
+The installer uses consistent cursor-key choices for the pload data directory,
 launcher directory, virtual-environment directory, Python directory, runtime
-source, pip index, and optional shell integration. Press Enter to accept a
-marked default.
+source, pip index, and optional shell integration. Use `↑`/`↓` to move and
+Enter to accept the highlighted value. Without a terminal UI, the same prompts
+fall back to numbered choices.
 
 After installation it prints an ASCII welcome screen with copyable next steps.
 The same screen is shown whenever you run bare `pload` (see the screenshot at
@@ -74,6 +78,60 @@ python -m pload.installer --yes \
 `--yes` accepts explicit values and saved defaults. It only changes a shell
 profile when `--shell` is supplied or already configured.
 
+## Reproduce and share environments
+
+The `1.2` preview uses one clean, user-authored `pload.toml` as portable intent.
+pload manages `.pload_lock.toml` (exact versions and artifacts) and
+`.pload_plan.toml` (the selected acquisition route for every package):
+
+```console
+pload describe v2 -o pload.toml
+pload plan pload.toml
+pload apply pload.toml
+pload apply --local         # reproduce into .venv beside pload.toml
+```
+
+`plan` fetches only index pages and independent package metadata—never wheel
+bodies—and inventories pload/pip/uv caches, compatible existing environments,
+local/SSH stores and indexes. Its interactive chooser shows only dependencies
+written by the user; transitive dependencies are routed automatically. It
+supports previous/next, undo, reset, save and save-and-apply through a
+compact shortcut row (`p/n/u/r/s/a/q`); the selection list itself contains only
+real package sources. `apply` executes exactly the saved plan:
+it never re-resolves, changes route, falls back, or uploads packages. Set
+`[plan].mode = "auto"` in `pload.toml` to save recommended routes without the
+chooser; strict per-package exceptions live under `[plan.packages.NAME]`.
+`apply` prints the saved plan first, then compact Docker-style progress rows.
+Each package is prefixed by its route, such as `[cache]`, `[index-exact]`, or
+`[repository]`, followed only by its byte progress. Verbose grey source/status
+suffixes are intentionally omitted because the saved plan above already names
+the selected resource. The bar
+uses Rich's standard adaptive-width bar with explicit start and end boundaries,
+so it grows naturally on wider terminals without another progress dependency.
+Index and repository transfers report real received bytes at up to 30 updates
+per second. SSH repository downloads stream the remote object directly;
+cache routes report bytes while verifying SHA-256 instead of turning green
+before visible work. Environment-copy routes validate the source `RECORD`, then
+immediately stage each byte from the compatible environment and finish green
+before pload advances to the next package. The staged files are installed after
+the target environment exists.
+Redirected logs remain coalesced instead of flooding CI.
+
+Use `pload apply --local` (or `-l`) for a project-local environment. It creates
+`.venv` beside the selected `pload.toml`, matching the layout produced by
+`pload init` while executing the saved declarative plan exactly.
+
+Back up a special or slow wheel only when you explicitly request it:
+
+```console
+pload remote add torch --from v10 --remote lab
+```
+
+See the [declarative environment guide](docs/declarative-environments.md) for the
+[complete TOML field reference](docs/declarative-environments.md#complete-ploadtoml-field-reference),
+exact versus compatible policies, resource-selection algorithm, CUDA wheel
+caching, idempotency and current platform boundaries.
+
 ## Upgrade
 
 Check the installed version first:
@@ -88,6 +146,12 @@ and virtual environments are kept:
 
 ```console
 pload-install --yes --package-spec "pload==1.0.0"
+```
+
+To opt into the declarative-environment pre-release for testing:
+
+```console
+pload-install --yes --package-spec "pload==1.2.0b1"
 ```
 
 To always follow the newest published release instead of pinning a version,
@@ -147,7 +211,10 @@ pload v1                          # activate an environment by ID
 
 Run `pload new` without options to start the guided creator. It lists detected
 Python runtimes, then asks for the interpreter, environment name, description,
-and optional packages. Press Enter to accept the suggested value at each step.
+and optional packages. When packages are present, choose **Automatic** to let
+pload prefer a compatible local wheel cache and otherwise use the configured
+index, or **Custom** to choose the source of each top-level package yourself.
+Press Enter to accept the suggested value at each step.
 
 ## Configure later
 
@@ -265,6 +332,7 @@ Create a named environment with a description:
 pload new                     # guided creation
 pload new -n data -v 3.12 -m "Data analysis"
 pload new -n web -v 3.12 -r fastapi uvicorn -m "Web API"
+pload new -n lab -r numpy torch -s custom  # choose each top-level package source
 pload new -v 3.12 --message "Temporary data tools"  # auto-named safely
 pload list
 pload v1
@@ -294,6 +362,13 @@ available number. `pload list` displays environments newest-first:
 The table includes ID, name, Python version, description, and full path. A
 spinner is shown in interactive terminals; redirected and CI output uses stable
 ordinary log lines.
+
+Package requests are installed one at a time. A misspelled, unavailable, or
+invalid request is reported and skipped, while later requests still run and
+successful installations remain in the environment. The command returns a
+failure status at the end when any requested package failed, with one summary
+listing those packages. Source selection applies only to packages explicitly
+entered by the user; pip continues to resolve their transitive dependencies.
 
 ## Help and aliases
 
@@ -344,6 +419,19 @@ pload py ls --filter uv,conda
 pload python install 3.12
 pload py p 3.12
 ```
+
+## Terminal experience
+
+All interactive screens share the same keyboard and visual language. Use
+`↑`/`↓` and Enter in guided creation, setup, and package-route selection;
+recommended values start highlighted. Status, success, warning, and error
+messages use the same symbols and colors everywhere, while compact border-light
+tables keep lists readable.
+
+`NO_COLOR=1` disables color. `PLOAD_NO_PROGRESS=1` replaces animated progress
+with plain status lines. Every guided workflow also has an explicit flag-based
+form for scripts. See the [terminal experience specification](docs/terminal-experience.md)
+for the complete interaction and output contract.
 
 ## Isolation and directory layout
 

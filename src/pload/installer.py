@@ -6,16 +6,15 @@ import sys
 from argparse import Namespace
 from pathlib import Path
 
+from questionary import Choice
 from rich import box
-from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from pload import __version__
+from pload import __version__, ui
 from pload.errors import PloadError
-from pload.managers.color import Colors
 from pload.settings import (
     USTC_PYTHON_MIRROR,
     default_bin_dir,
@@ -44,7 +43,7 @@ PIP_SOURCE_CHOICES = [
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(
+    parser = ui.ArgumentParser(
         prog="pload-install",
         description=(
             "Install pload into its own private runtime, create a stable executable in a "
@@ -104,7 +103,7 @@ numbered menu with an explanation for every option.""",
 def render_help(detailed=False):
     parser = build_parser()
     if detailed:
-        console = Console(highlight=False)
+        console = ui.console()
         console.print(Markdown(r"""
 # Install pload without tying it to a project environment
 
@@ -120,19 +119,17 @@ executable bin directory [/home/me/.local/bin]:
 managed virtual environment directory [/mnt/tools/pload/venvs]: /mnt/venvs
 managed Python directory [/mnt/tools/pload/pythons]: /mnt/python
 
-Choose the Python runtime download source
-  1) official (default)
-  2) ustc
-  3) custom
-Enter a number [1]: 2
+? Choose the Python runtime download source (↑/↓ move • enter select)
+  official   Astral's official releases
+❯ ustc       USTC mirror in China
+  custom     Your own mirror
 
-Choose the Python package index used to install pload and uv
-  1) official (default)
-  2) tsinghua
-  3) ustc
-  4) aliyun
-  5) custom
-Enter a number [1]: 3
+? Choose the Python package index (↑/↓ move • enter select)
+  official   Official PyPI
+  tsinghua   Tsinghua University mirror
+❯ ustc       USTC mirror
+  aliyun     Alibaba Cloud mirror
+  custom     Private compatible index
 ```
 
 ## Resulting layout
@@ -178,21 +175,18 @@ $ pload-install --yes \
 `--yes` reuses explicit values and saved defaults. It does not edit a shell
 profile unless `--shell` is supplied or already saved in the configuration.
 """.strip()))
-        table = Table(
-            title="Related options",
-            box=box.ROUNDED,
-            header_style="bold cyan",
-            border_style="blue",
+        console.print("\n[bold cyan]Options[/]")
+        table = ui.table(
+            ("OPTION", "cyan", {"no_wrap": True}),
+            ("MEANING", "", {}),
         )
-        table.add_column("OPTION", style="bold green", no_wrap=True)
-        table.add_column("MEANING")
         for action in parser._actions:
             if action.dest == "help" or not action.option_strings:
                 continue
             table.add_row(", ".join(action.option_strings), action.help or "")
         console.print(table)
         return
-    console = Console(highlight=False)
+    console = ui.console()
     usage = " ".join(parser.format_usage().split())
     usage_text = Text()
     for index, token in enumerate(usage.split()):
@@ -217,7 +211,7 @@ profile unless `--shell` is supplied or already saved in the configuration.
     table = Table(box=box.SIMPLE, header_style="bold cyan", show_edge=False)
     table.add_column("COMMAND", style="bold green", no_wrap=True)
     table.add_column("PURPOSE")
-    table.add_row("pload-install", "Start the colored, numbered guided setup")
+    table.add_row("pload-install", "Start the cursor-key guided setup")
     table.add_row("pload-install --yes", "Reuse defaults without interactive questions")
     table.add_row(
         "pload-install --yes --home PATH",
@@ -241,49 +235,132 @@ profile unless `--shell` is supplied or already saved in the configuration.
 def ask(prompt, default, non_interactive=False):
     if non_interactive:
         return str(default)
-    answer = input(f"{Colors.cyan(prompt)} [{Colors.green(default)}]: ").strip()
-    return answer or str(default)
+    return ui.text(prompt, default=str(default))
 
 
 def ask_choice(prompt, choices, default, non_interactive=False):
     if non_interactive:
         return default
     items = [item if isinstance(item, tuple) else (item, "") for item in choices]
-    keys = [item[0] for item in items]
-    default_index = keys.index(default) if default in keys else 0
-    while True:
-        print(f"\n{Colors.bold(prompt)}")
-        for index, (key, description) in enumerate(items, 1):
-            marker = Colors.green(" (default)") if index - 1 == default_index else ""
-            print(f"  {Colors.cyan(index)}) {Colors.bold(key)}{marker}")
-            if description:
-                print(f"     {description}")
-        answer = input(
-            f"{Colors.cyan('Enter a number')} [{Colors.green(default_index + 1)}]: "
-        ).strip().lower()
-        if not answer:
-            return keys[default_index]
-        if answer.isdigit() and 1 <= int(answer) <= len(items):
-            return keys[int(answer) - 1]
-        if answer in keys:
-            return answer
-        print(Colors.yellow(f"Please enter 1-{len(items)}."))
+    choices = [
+        Choice(f"{key:<10} {description}", value=key)
+        for key, description in items
+    ]
+    return ui.select(prompt, choices, default=default)
 
 
 def print_welcome():
-    print(Colors.bold("\npload guided setup"))
-    print(
-        "This installer keeps pload itself, downloaded Python runtimes, and virtual "
-        "environments independent. Press Enter to accept any recommended default."
+    output = ui.console()
+    ui.heading(
+        "Set up pload",
+        "Choose where pload, Python runtimes, and environments live. "
+        "Press Enter to accept the recommended value.",
+        output=output,
     )
-    print(Colors.cyan("\nDirectory layout"))
-    print("  pload home       configuration, private runtime, state, and caches")
-    print("  executable bin   stable `pload` command; add this directory to PATH")
-    print("  environments     every managed project environment")
-    print("  Python runtimes  Python versions downloaded through uv")
+    output.print("[dim]You can revisit these choices later with `pload cfg -t`.[/]")
+
+
+def review_settings(args):
+    """Edit setup values from one revisitable settings screen."""
+    home = Path(args.home or Path.home() / ".pload").expanduser().resolve()
+    existing = load_settings(home)
+    python = existing.get("python", {})
+    values = {
+        "home": str(home),
+        "bin_dir": str(Path(args.bin_dir or existing.get("bin_dir") or default_bin_dir())),
+        "venvs_dir": str(Path(args.venvs_dir or existing.get("venvs_dir") or home / "venvs")),
+        "python_dir": str(Path(args.python_dir or python.get("install_dir") or home / "pythons")),
+        "source": args.source or python.get("source", "official"),
+        "mirror_url": args.mirror_url or python.get("mirror"),
+        "pip_source": args.pip_source or existing.get("pip_source", "official"),
+        "pip_index": args.pip_index or existing.get("pip_index"),
+        "shell": args.shell or existing.get("shell") or detect_shell(),
+    }
+    labels = {
+        "home": "pload data",
+        "bin_dir": "executable bin",
+        "venvs_dir": "environments",
+        "python_dir": "Python runtimes",
+        "source": "Python source",
+        "pip_source": "package index",
+        "shell": "shell integration",
+    }
+    path_fields = {"home", "bin_dir", "venvs_dir", "python_dir"}
+    while True:
+        choices = [
+            Choice(f"{labels[key]:<19} {values[key]}", value=key)
+            for key in labels
+        ]
+        choices.extend([
+            Choice(f"{ui.glyph('✓', '[ok]')} Save configuration", value="__save__"),
+            Choice(f"{ui.glyph('×', 'x')} Cancel", value="__cancel__"),
+        ])
+        field = ui.select(
+            "Review setup",
+            choices,
+            default="__save__",
+            instruction=ui.navigation_hint("edit"),
+        )
+        if field == "__save__":
+            break
+        if field == "__cancel__":
+            raise KeyboardInterrupt
+        if field in path_fields:
+            values[field] = ui.text(labels[field], default=values[field])
+        elif field == "source":
+            values[field] = ui.select(
+                "Python runtime source",
+                [Choice(f"{key:<10} {description}", value=key)
+                 for key, description in PYTHON_SOURCE_CHOICES],
+                default=values[field],
+            )
+            if values[field] == "custom":
+                values["mirror_url"] = ui.text(
+                    "Custom mirror base URL",
+                    default=values["mirror_url"] or "file:///path/to/mirror",
+                )
+        elif field == "pip_source":
+            values[field] = ui.select(
+                "Python package index",
+                [Choice(f"{key:<10} {description}", value=key)
+                 for key, description in PIP_SOURCE_CHOICES],
+                default=values[field],
+            )
+            if values[field] == "custom":
+                values["pip_index"] = ui.text(
+                    "Custom package index URL",
+                    default=values["pip_index"] or "https://example.com/simple",
+                )
+        elif field == "shell":
+            detected = detect_shell()
+            shells = list(dict.fromkeys([detected, "bash", "zsh", "fish", "powershell"]))
+            values[field] = ui.select(
+                "Shell integration",
+                [Choice(
+                    f"{shell:<12} "
+                    f"{'detected shell' if shell == detected else 'update profile'}",
+                    value=shell,
+                ) for shell in shells]
+                + [Choice("none         print manual instructions", value="none")],
+                default=values[field],
+            )
+
+    args.home = values["home"]
+    args.bin_dir = values["bin_dir"]
+    args.venvs_dir = values["venvs_dir"]
+    args.python_dir = values["python_dir"]
+    args.source = values["source"]
+    args.mirror_url = values["mirror_url"]
+    args.pip_source = values["pip_source"]
+    args.pip_index = values["pip_index"]
+    args.shell = values["shell"]
+    args.yes = True
+    return args
 
 
 def collect_settings(args):
+    if not args.yes and ui.is_interactive():
+        args = review_settings(args)
     home = Path(ask("pload home", args.home or Path.home() / ".pload", args.yes)).expanduser().resolve()
     existing = load_settings(home)
     bin_dir = Path(
@@ -367,10 +444,11 @@ def collect_settings(args):
         pip_index = ask("custom Python package index URL", "https://example.com/simple", False)
 
     return {
+        **existing,
         "home": str(home),
         "bin_dir": str(bin_dir),
         "venvs_dir": str(venvs_dir),
-        "state_dir": str(home / "state"),
+        "state_dir": existing.get("state_dir", str(home / "state")),
         "pip_source": pip_source,
         "pip_index": pip_index,
         "package_spec": args.package_spec or existing.get("package_spec") or default_package_spec(),
@@ -544,30 +622,23 @@ def configure_shell(settings):
 
 def print_welcome_screen(version, launcher, settings, profile=None):
     """Show a friendly post-install landing screen with copyable next steps."""
-    print()
-    print(Colors.cyan("   ____  _                 _ "))
-    print(Colors.cyan("  |  _ \\| | ___   __ _  __| |"))
-    print(Colors.cyan("  | |_) | |/ _ \\ / _` |/ _` |"))
-    print(Colors.cyan("  |  __/| | (_) | (_| | (_| |"))
-    print(Colors.cyan("  |_|   |_|\\___/ \\__,_|\\__,_|"))
-    print(Colors.bold(f"\n  pload {version} is ready"))
-    print("  Your private runtime and launcher are installed.")
-    print()
-    print(Colors.bold("  Next steps"))
-    print(f"  {Colors.green('1')}  Check configuration:  pload cfg")
-    print(f"  {Colors.green('2')}  Find Python versions:  pload python list")
-    print(f"  {Colors.green('3')}  Create an environment: pload new -n data -v 3.12")
-    print(f"  {Colors.green('4')}  Read the walkthrough:  pload -h -d")
-    print()
-    print(Colors.bold("  Installed paths"))
-    print(f"  launcher   {launcher}")
-    print(f"  data       {settings['home']}")
-    print(f"  environments {settings['venvs_dir']}")
+    output = ui.console()
+    ui.logo(output=output)
+    output.print()
+    ui.success(f"pload {version} is ready", detail="Private runtime and launcher installed")
+    ui.heading("Next steps", output=output)
+    output.print("  [cyan]1[/]  Check configuration   [bold]pload cfg[/]")
+    output.print("  [cyan]2[/]  Find Python versions   [bold]pload python list[/]")
+    output.print("  [cyan]3[/]  Create an environment  [bold]pload new -n data -v 3.12[/]")
+    output.print("  [cyan]4[/]  Read the walkthrough   [bold]pload -h -d[/]")
+    ui.heading("Installed paths", output=output)
+    output.print(f"  launcher      [dim]{launcher}[/]")
+    output.print(f"  data          [dim]{settings['home']}[/]")
+    output.print(f"  environments  [dim]{settings['venvs_dir']}[/]")
     if profile:
-        print(f"  shell      updated {profile}")
+        output.print(f"  shell         [dim]updated {profile}[/]")
     else:
-        print(f"  shell      add {settings['bin_dir']} to PATH, then start a new shell")
-    print()
+        output.print(f"  shell         [dim]add {settings['bin_dir']} to PATH[/]")
 
 
 def run(argv=None):
@@ -581,18 +652,18 @@ def run(argv=None):
     settings = collect_settings(args)
     path = save_settings(settings["home"], settings)
     if args.no_runtime_install:
-        print(f"[*] Wrote configuration: {path}")
+        ui.success("Wrote configuration", detail=str(path))
         return 0
     python = install_private_runtime(settings)
     launcher = write_launcher(settings, python)
     profile = configure_shell(settings)
     installed_version = installed_pload_version(python)
-    print(f"[*] Installed pload {installed_version}: {launcher}")
-    print(f"[*] Configuration: {path}")
+    ui.success(f"Installed pload {installed_version}", detail=str(launcher))
+    ui.success("Saved configuration", detail=str(path))
     if profile:
-        print(f"[*] Updated shell profile: {profile}")
+        ui.success("Updated shell profile", detail=str(profile))
     else:
-        print(f"[!] Add {settings['bin_dir']} to PATH, then run: pload shell-init <shell>")
+        ui.warning(f"Add {settings['bin_dir']} to PATH, then run: pload shell-init <shell>")
     print_welcome_screen(installed_version, launcher, settings, profile)
     return 0
 
@@ -600,8 +671,11 @@ def run(argv=None):
 def main(argv=None):
     try:
         return run(argv)
+    except (KeyboardInterrupt, EOFError):
+        ui.warning("Cancelled")
+        return 130
     except (PloadError, OSError) as exc:
-        print(f"pload-install: error: {exc}", file=sys.stderr)
+        ui.error(str(exc))
         return 1
 
 

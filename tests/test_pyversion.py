@@ -1,3 +1,4 @@
+import os
 from dataclasses import replace
 from pathlib import Path
 
@@ -17,6 +18,20 @@ def test_source_filter_accepts_commas_spaces_and_aliases():
 def test_source_filter_rejects_unknown_types():
     with pytest.raises(PloadError, match="unknown Python source"):
         PythonManager.parse_sources(["mystery"])
+
+
+def test_unresolvable_windows_alias_uses_absolute_path(monkeypatch, tmp_path):
+    alias = tmp_path / "python.exe"
+    original_resolve = Path.resolve
+
+    def inaccessible(self):
+        if self == alias:
+            raise OSError("inaccessible app execution alias")
+        return original_resolve(self)
+
+    monkeypatch.setattr(Path, "resolve", inaccessible)
+    assert PythonManager._resolved_path(alias) == alias.absolute()
+    assert PythonManager._path_key(alias) == os.path.normcase(str(alias.absolute()))
 
 
 def test_discovery_deduplicates_resolved_paths_and_filters(monkeypatch, tmp_path):

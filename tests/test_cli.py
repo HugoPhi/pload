@@ -1,5 +1,10 @@
-import pytest
+import io
 
+import pytest
+from rich.console import Console
+
+import pload.cli as cli_module
+import pload.declarative as declarative_module
 from pload.cli import build_parser, main, shell_script
 
 
@@ -124,6 +129,19 @@ def test_simple_commands_have_no_alias_but_long_options_have_short_forms():
         raise AssertionError("new must not have a command alias")
 
 
+def test_parser_errors_are_compact_and_actionable(capsys):
+    with pytest.raises(SystemExit) as error:
+        build_parser().parse_args(["lisst"])
+
+    output = capsys.readouterr().err
+    assert error.value.code == 2
+    assert "error:" in output
+    assert "invalid choice" in output
+    assert "Did you mean 'list'?" in output
+    assert "Try 'pload -h' for help." in output
+    assert not output.startswith("usage:")
+
+
 def test_description_short_option_does_not_conflict_with_detailed_help():
     args = build_parser().parse_args(["new", "-m", "Data tools"])
 
@@ -152,7 +170,7 @@ def test_brief_and_detailed_help_are_distinct(capsys):
     assert "$ pload new -n data" in detailed
     assert "What changes on disk" in detailed
     assert "PLOAD_HOME/runtime" in detailed
-    assert "Related options" in detailed
+    assert "Options" in detailed
 
 
 def test_command_specific_detailed_help_uses_d_flag(capsys):
@@ -219,6 +237,109 @@ def test_no_arguments_show_welcome_and_simple_usage(capsys):
     assert output.index("Simple usage") < output.index("Global options")
 
 
+def test_apply_prints_saved_plan_before_package_progress(tmp_path, monkeypatch, capsys):
+    events = []
+
+    class FakeManager:
+        def __init__(self, config):
+            pass
+
+        def saved_plan(self, path):
+            events.append("loaded")
+            return {"name": "demo"}
+
+        def apply(self, path, name, offline, progress, target=None):
+            events.append("apply")
+            progress("PACKAGE\t1/1\tindex-exact\tnumpy==2.0.2\t16777216")
+            progress(
+                "SOURCE\tnumpy==2.0.2\t"
+                "downloading from https://files.invalid/numpy.whl"
+            )
+            progress("DOWNLOAD\tnumpy==2.0.2\t8388608\t16777216")
+            progress("PACKAGE_DONE\tnumpy==2.0.2\tverified")
+            return tmp_path / "demo"
+
+    monkeypatch.setattr(declarative_module, "DeclarativeEnvironmentManager", FakeManager)
+    monkeypatch.setattr(
+        cli_module, "print_declarative_plan",
+        lambda plan: events.append("printed-plan"),
+    )
+
+    assert main(["apply", str(tmp_path / "pload.toml")]) == 0
+
+    assert events == ["loaded", "printed-plan", "apply"]
+    output = capsys.readouterr().out
+    assert "[index-exact]" in output
+    assert "numpy==2.0.2" in output
+    assert "downloading from https://files.invalid/numpy.whl" not in output
+    assert "8.0 MiB / 16.0 MiB" in output
+
+
+def test_apply_progress_uses_one_adaptive_rich_row_per_package():
+    stream = io.StringIO()
+    console = Console(file=stream, force_terminal=True, color_system=None, width=160)
+
+    with cli_module.ApplyProgress(console) as progress:
+        progress("PACKAGE\t1/1\tindex-exact\tnumpy==2.0.2\t16777216")
+        progress(
+            "SOURCE\tnumpy==2.0.2\t"
+            "downloading from https://files.invalid/numpy.whl"
+        )
+        progress("DOWNLOAD\tnumpy==2.0.2\t8388608\t16777216")
+
+    rendered = stream.getvalue()
+    assert "[index-exact]" in rendered
+    assert "numpy==2.0.2" in rendered
+    progress_line = next(line for line in rendered.splitlines() if "8.0 MiB" in line)
+    assert "[" in progress_line and "]" in progress_line
+    # Rich falls back to ASCII on legacy Windows consoles even when a terminal
+    # is forced, while Unix terminals use the Unicode heavy bar.
+    assert "━" in progress_line or "-" in progress_line
+    assert "░" not in rendered
+    assert "8.0 MiB / 16.0 MiB" in rendered
+    assert "downloading from" not in rendered
+
+
+def test_environment_copy_progress_finishes_green():
+    stream = io.StringIO()
+    console = Console(
+        file=stream, force_terminal=True, color_system="standard", no_color=False,
+        width=120, height=5, _environ={},
+    )
+
+    with cli_module.ApplyProgress(console) as progress:
+        progress("PACKAGE\t1/1\tenvironment-copy\tdemo==1.0\t0")
+        progress("DOWNLOAD\tdemo==1.0\t0\t100")
+        progress("DOWNLOAD\tdemo==1.0\t100\t100")
+        progress("PACKAGE_DONE\tdemo==1.0\tcopied")
+
+    assert "\x1b[32m" in stream.getvalue()
+
+
+def test_apply_local_targets_venv_beside_manifest(tmp_path, monkeypatch):
+    captured = {}
+    manifest = tmp_path / "project" / "pload.toml"
+
+    class FakeManager:
+        def __init__(self, config):
+            pass
+
+        def saved_plan(self, path):
+            return {"packages": []}
+
+        def apply(self, path, name, offline, progress, target=None):
+            captured["target"] = target
+            return target
+
+    monkeypatch.setattr(
+        declarative_module, "DeclarativeEnvironmentManager", FakeManager
+    )
+    monkeypatch.setattr(cli_module, "print_declarative_plan", lambda plan: None)
+
+    assert main(["apply", str(manifest), "--local"]) == 0
+    assert captured["target"] == manifest.parent / ".venv"
+
+
 def test_new_without_options_uses_guided_creation(tmp_path, monkeypatch):
     captured = {}
 
@@ -229,6 +350,7 @@ def test_new_without_options_uses_guided_creation(tmp_path, monkeypatch):
             "name": "guided",
             "description": "Created interactively",
             "requirements": None,
+            "package_strategy": None,
         },
     )
     monkeypatch.setattr(
@@ -237,7 +359,7 @@ def test_new_without_options_uses_guided_creation(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         "pload.cli.DependencyManager.install_dependencies",
-        lambda self, path, requirements, channel: None,
+        lambda self, path, requirements, channel, strategy: None,
     )
 
     assert main(["-H", str(tmp_path / "home"), "new"]) == 0

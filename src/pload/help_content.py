@@ -1,7 +1,6 @@
-from rich import box
-from rich.console import Console
 from rich.markdown import Markdown
-from rich.table import Table
+
+from pload import ui
 
 GUIDES = {
     (): r"""
@@ -50,6 +49,20 @@ does not replace the operating system Python.
 - project-local `pload init` environments may live outside the managed root.
 
 Use `pload cfg` to see the exact effective paths before creating anything.
+
+## Reproduce an environment from one file
+
+```console
+$ pload describe v1 -o pload.toml
+$ pload plan pload.toml
+$ pload apply pload.toml
+```
+
+`pload.toml` describes user intent. `plan` resolves from independent metadata
+when its managed lock is stale, then inventories resources without downloading
+wheel bodies. Analysis does not overwrite saved choices; Save, Apply,
+`--no-ui`, or `[plan].mode = "auto"` writes the plan. `apply` executes only that saved plan and never
+changes route or uploads.
 """,
     ("new",): r"""
 # Create a managed environment
@@ -72,6 +85,12 @@ If `--name` is omitted, pload generates a short unique name such as
 guided creator. Use `--message` (or `-m`) for the human
 description; it never affects the generated directory name.
 
+When packages are requested, `--package-strategy auto` (the default) prefers
+a compatible wheel already in pload's cache and otherwise uses the configured
+package index. `--package-strategy custom` (or `-s custom`) opens one source
+choice for each package written on the command line. Dependencies introduced
+by those packages remain automatic, so the chooser stays short.
+
 ## Choose an exact location or interpreter
 
 ```console
@@ -89,8 +108,11 @@ is not appropriate.
 - Creates one virtual-environment directory and one registry entry.
 - Does not modify the system Python or activate the environment automatically.
 - If Python cannot create the environment, the incomplete directory is removed.
-- If later package installation fails, the valid environment remains so it can
-  be inspected or removed with `pload rm`.
+- Requested packages are attempted one at a time. A bad request is reported,
+  later requests still run, and successful installations remain available.
+- If any package failed, pload returns a failure status after all requests and
+  lists every failure. The valid environment remains so it can be inspected or
+  removed with `pload rm`.
 """,
     ("init",): r"""
 # Create an environment for the current project
@@ -331,8 +353,141 @@ selected shell profile. It does not reinstall pload or uv.
 }
 
 
+GUIDES[("describe",)] = r"""
+# Turn an existing environment into one portable configuration
+
+```console
+pload describe v2
+pload describe /project/.venv -o project.pload.toml
+pload describe /project/.venv/bin/python -n project -r lab
+pload describe v2 -s torch=https://download.pytorch.org/whl/cu121
+```
+
+The default exact mode locks every installed application package to an actual
+wheel and SHA-256. pload reuses its local cache and may obtain a missing wheel,
+but does not upload it. Use `pload remote add PACKAGE` for explicit backup.
+
+Use `--mode compatible` only when exact wheels do not exist and future
+re-resolution is acceptable. Native Conda packages are not silently converted.
+Credentials and URL query tokens are never written into the portable file.
+Use repeatable `--source PACKAGE=URL` options when an installed package came from
+a dedicated index that cannot be inferred reliably from installed metadata.
+"""
+GUIDES[("plan",)] = r"""
+# Explain how the desired state can be satisfied
+
+```console
+pload plan
+pload plan project.pload.toml
+pload plan --offline
+pload plan --json
+pload plan --no-ui
+```
+
+Planning resolves missing/stale locks using Simple API pages and independent
+Core Metadata, then checks pload/pip/uv caches, compatible environments,
+adjacent artifacts and content-addressed repositories. It never downloads a
+wheel body. A current lock skips metadata resolution. Cache roots are indexed
+once and only matching-Python environments are inspected. The chooser reports
+measured local read throughput and network/repository RTT instead of fixed time
+guesses. Analysis does not overwrite `.pload_plan.toml`; Save, Apply,
+`--no-ui`, and `[plan].mode = "auto"` persist choices, while quit and `--json`
+do not.
+
+The chooser shows only requirements written in `pload.toml` and
+automatically assigns routes to their transitive dependencies. It supports
+previous/next, undo, reset, save, and save-and-apply; `--no-ui` selects the
+lowest-cost measured routes for automation.
+
+For configuration-driven automation, add:
+
+```toml
+[plan]
+mode = "auto"
+```
+
+This saves recommended routes without opening the chooser. Strict exceptions
+can be declared under `[plan.packages.NAME]` with `method` and optional
+`location`; an unavailable override fails planning instead of falling back.
+"""
+GUIDES[("lock",)] = r"""
+# Resolve the user declaration into an exact managed lock
+
+```console
+pload lock
+pload lock project.pload.toml
+pload lock --offline
+```
+
+This legacy explicit command is retained for preview compatibility. The normal
+workflow is now `pload plan`, whose metadata-only resolver writes the managed
+lock without obtaining wheel bodies. Prefer `plan` for new configurations.
+"""
+GUIDES[("apply",)] = r"""
+# Materialize the configuration
+
+```console
+pload apply
+pload apply project.pload.toml -n project-copy
+pload apply --local
+pload apply --offline
+```
+
+Apply requires a current `.pload_lock.toml` and `.pload_plan.toml`, then installs
+Python when needed. Before changing anything it prints the complete saved plan.
+Execution then uses compact Docker-style progress rows. Each package starts with
+its selected method in brackets, followed by `NAME==VERSION`, source, progress
+bar and real network byte counts. It executes each selected route, verifies hashes, creates
+the environment, installs packages and runs `pip check`. It never resolves, tries an
+alternative route, or uploads package bytes. A selected `index-exact` route
+downloads from the locked URL even if the same wheel is already cached; the
+verified wheel is then installed locally with package networking disabled.
+Reapplying the same configuration is idempotent; an
+existing environment with different state is never silently overwritten.
+
+`--local` (or `-l`) creates `.venv` beside the selected configuration file,
+giving declarative projects the same local-environment layout as `pload init`.
+The location follows the configuration file rather than the caller's current
+working directory, so `pload apply path/to/pload.toml --local` reliably targets
+`path/to/.venv`.
+"""
+GUIDES[("repo",)] = r"""
+# Configure reusable artifact providers
+
+```console
+pload repo add lab frpxiaoxin:/home/tibless/pload-cloud -t ssh
+pload repo add disk /mnt/shared/pload -t local
+pload repo list
+pload repo remove lab
+```
+
+`describe` embeds configured local/SSH providers in `pload.toml`; `apply` uses them
+automatically. SSH relies on OpenSSH aliases, keys and agents and stores no password.
+Objects are addressed by SHA-256 so identical large wheels are stored only once.
+Removing a provider forgets its configuration but does not delete remote data.
+"""
+for _command in ("add", "list", "remove"):
+    GUIDES[("repo", _command)] = GUIDES[("repo",)]
+
+GUIDES[("remote",)] = r"""
+# Back up package artifacts explicitly
+
+```console
+pload remote add torch --from v10 --remote lab
+pload remote add numpy==2.1.0 -f ./project/.venv -r disk
+```
+
+`remote add` finds the exact installed version, reuses its original cached wheel
+when available, verifies its SHA-256 identity, and stores it in the selected
+content-addressed repository. If the original wheel is unavailable it may fetch
+that exact version from `--index`. Planning and applying never upload packages;
+publication happens only through this explicit command.
+"""
+GUIDES[("remote", "add")] = GUIDES[("remote",)]
+
+
 def render_detailed_help(parser, command_path):
-    console = Console(highlight=False)
+    console = ui.console()
     content = GUIDES.get(tuple(command_path), GUIDES[()])
     console.print(Markdown(content.strip()))
 
@@ -343,14 +498,11 @@ def render_detailed_help(parser, command_path):
         label = ", ".join(action.option_strings) if action.option_strings else action.dest
         rows.append((label, action.help or ""))
     if rows:
-        table = Table(
-            title="Related options",
-            box=box.ROUNDED,
-            header_style="bold cyan",
-            border_style="blue",
+        console.print("\n[bold cyan]Options[/]")
+        table = ui.table(
+            ("OPTION", "cyan", {"no_wrap": True}),
+            ("MEANING", "", {}),
         )
-        table.add_column("OPTION", style="bold green", no_wrap=True)
-        table.add_column("MEANING")
         for label, help_text in rows:
             table.add_row(label, help_text)
         console.print(table)

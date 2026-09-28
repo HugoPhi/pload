@@ -432,7 +432,7 @@ class PythonManager:
             return []
 
     def _classify_path(self, path, declared):
-        resolved = str(path.resolve()).replace("\\", "/").lower()
+        resolved = str(self._resolved_path(path)).replace("\\", "/").lower()
         configured_uv = str(Path(self.config.python["install_dir"]).expanduser()).replace(
             "\\", "/"
         ).lower()
@@ -481,7 +481,18 @@ class PythonManager:
 
     @staticmethod
     def _path_key(path):
-        return os.path.normcase(str(Path(path).expanduser().resolve()))
+        return os.path.normcase(str(PythonManager._resolved_path(path)))
+
+    @staticmethod
+    def _resolved_path(path):
+        path = Path(path).expanduser()
+        try:
+            return path.resolve()
+        except OSError:
+            # Windows Store app-execution aliases can look like files but reject
+            # GetFinalPathNameByHandle on older Python releases. They are still
+            # valid discovery candidates and will be rejected safely by _probe.
+            return path.absolute()
 
     @staticmethod
     def _version_key(version):
@@ -492,7 +503,7 @@ class PythonManager:
         unique = []
         seen = set()
         for path in paths:
-            key = os.path.normcase(str(Path(path).expanduser().resolve()))
+            key = os.path.normcase(str(PythonManager._resolved_path(path)))
             if key not in seen:
                 seen.add(key)
                 unique.append(Path(path).expanduser())

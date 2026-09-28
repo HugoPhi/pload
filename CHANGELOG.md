@@ -1,5 +1,92 @@
 # Changelog
 
+## 1.2.0b1 - 2026-09-28
+
+Feature-complete beta for the declarative environment workflow.
+
+### Architecture reset
+
+- Replace the discarded lock-then-plan prototype with a resource-aware
+  workflow: `plan` resolves only from Simple API/Core Metadata, inventories all
+  resources, and writes `.pload_plan.toml`; `apply` executes that exact file.
+- Never download wheel bodies during planning. Indexes without PEP 658/714
+  metadata fail with an actionable message instead of silently filling cache.
+- Discover exact wheels in pload, pip and uv caches and copyable distributions
+  in compatible pload environments. Recheck SHA-256 or installed `RECORD`
+  fingerprints during apply.
+- Add an interactive per-package route chooser with previous/next navigation,
+  undo, reset-to-fastest, save and save-and-apply actions. Show only direct
+  user requirements; route transitive dependencies automatically.
+- Add explicit `pload remote add PACKAGE --from ENV --remote REPO`; apply and
+  describe never publish package bytes automatically.
+- Persist exact artifact URLs and hashes, reject stale or incomplete plans, and
+  stop on selected-route failure without trying alternatives.
+
+### Added
+
+- Introduce one terminal design system for prompts, tables, progress, success,
+  warning and error output. Guided creation and route planning now use familiar
+  cursor-key menus with numbered non-TTY fallbacks instead of bespoke command
+  loops.
+- Respect `NO_COLOR` consistently and keep animation limited to real terminals;
+  set `PLOAD_NO_PROGRESS=1` to replace spinners with plain status text.
+- Keep user intent in a clean portable `pload.toml` and store pload-managed
+  exact dependency, artifact and hash decisions in sibling `.pload_lock.toml`.
+- Add `pload describe`, metadata-only `pload plan` and idempotent `pload apply`.
+- Inventory the local wheel cache, adjacent artifacts, local/SSH content stores,
+  configured indexes and Python installations before choosing a route.
+- Allow package-specific indexes in `describe`, including CUDA wheel indexes,
+  while keeping credentials out of the portable configuration.
+- Reuse exact wheel archives by SHA-256, deduplicate local/SSH storage, record
+  detected NVIDIA driver provenance and roll back failed materializations.
+- Add complete field-by-field configuration, lock and plan references, enforce agreement between
+  desired dependency pins and package locks, and make policy repositories and
+  repositories drive lookup while publication remains explicit.
+- Validate locked wheel Python, ABI and platform tags against the requested
+  runtime during planning; incompatible cache entries can no longer be reported
+  as ready, and compatible mode explicitly plans network re-resolution instead.
+- Accept unpinned dependency intentions such as `numpy` and `pandas>=2`; the
+  metadata-only planner resolves the complete dependency closure and records
+  exact versions, hashes, URLs and tags without fetching wheel bodies.
+- Treat edits that add or change dependencies beside an existing lock as a stale
+  lock to reconcile, not an invalid configuration; re-resolution
+  uses the complete requested set and prefers existing pload cache wheels.
+- Migrate lock tables embedded by earlier 1.1 previews into `.pload_lock.toml`
+  without another dependency resolution or artifact download.
+- Show animated status for metadata resolution and artifact-repository inspection
+  instead of appearing frozen while network or SSH work is captured.
+- Refuse `apply` when the lock is absent or stale instead of resolving and
+  downloading implicitly.
+- Add `pload apply --local` / `-l` to reproduce a saved plan into `.venv`
+  beside its configuration file, matching `pload init` project layout.
+- Render apply transfers with Rich's adaptive-width standard progress bar,
+  explicit boundaries and the acquisition method in brackets.
+- Stream direct downloads in 16 KiB chunks and report measured byte progress at
+  up to 30 updates per second while coalescing non-interactive logs.
+- Stream local repository copies and SSH object responses so repository routes
+  report real byte progress instead of completing at once.
+- Remove grey source/status suffixes from progress rows. Cache verification and
+  local artifact copying now report actual processed bytes before completion.
+- Replace environment-copy's opaque zip/extract step with a validated file-list
+  staging stream that reports total and copied bytes and finishes green before
+  the next package begins.
+
+### Removed
+
+- Drop the unreleased transport-oriented `export`, `restore`, and repository
+  push/pull interface in favor of the declarative configuration workflow.
+
+### Fixed
+
+- Accept Rich's documented ASCII progress-bar fallback on Windows consoles in
+  the cross-platform release test suite.
+- Keep an external environment's interpreter path intact when probing packages,
+  instead of following its Python symlink out to the base installation.
+- Batch SSH repository inventory, publication and retrieval so environments with
+  several packages do not spend most of their time reconnecting. Show package
+  and transfer progress, enforce bounded SSH/SFTP operations, and report actual
+  transfer timeouts instead of appearing frozen.
+
 ## 1.0.0 - 2026-09-24
 
 ### Added

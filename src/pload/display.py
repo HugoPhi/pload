@@ -1,19 +1,16 @@
-from rich import box
-from rich.console import Console
-from rich.table import Table
-
-
-def _console():
-    return Console(highlight=False)
+from pload import ui
 
 
 def print_environment_table(environments):
-    table = Table(box=box.ROUNDED, header_style="bold cyan", border_style="blue")
-    table.add_column("ID", style="bold green", no_wrap=True)
-    table.add_column("NAME", style="bold", no_wrap=True)
-    table.add_column("PYTHON", style="yellow", no_wrap=True)
-    table.add_column("DESCRIPTION")
-    table.add_column("PATH", style="dim", overflow="fold")
+    table = ui.table(
+        ("ID", "bold cyan", {"width": 4, "no_wrap": True}),
+        ("NAME", "bold", {"width": 16, "overflow": "ellipsis", "no_wrap": True}),
+        ("PYTHON", "yellow", {"width": 8, "no_wrap": True}),
+        ("DESCRIPTION", "", {"width": 18, "overflow": "ellipsis", "no_wrap": True}),
+        ("PATH", "dim", {"min_width": 12, "ratio": 1,
+                          "overflow": "ellipsis", "no_wrap": True}),
+        expand=True,
+    )
     for item in environments:
         table.add_row(
             item.get("id", "-"),
@@ -22,16 +19,19 @@ def print_environment_table(environments):
             item.get("description") or "—",
             item.get("path", "-"),
         )
-    _console().print(table)
+    ui.console().print(table)
 
 
 def print_python_table(runtimes):
-    table = Table(box=box.ROUNDED, header_style="bold cyan", border_style="blue")
-    table.add_column("ID", style="bold green", no_wrap=True)
-    table.add_column("ALIAS", style="bold cyan", no_wrap=True)
-    table.add_column("VERSION", style="bold green", no_wrap=True)
-    table.add_column("TYPE", style="yellow", no_wrap=True)
-    table.add_column("PATH", style="dim", overflow="fold")
+    table = ui.table(
+        ("ID", "bold cyan", {"width": 5, "no_wrap": True}),
+        ("ALIAS", "cyan", {"width": 20, "overflow": "ellipsis", "no_wrap": True}),
+        ("VERSION", "green", {"width": 10, "no_wrap": True}),
+        ("TYPE", "yellow", {"width": 10, "no_wrap": True}),
+        ("PATH", "dim", {"min_width": 14, "ratio": 1,
+                          "overflow": "ellipsis", "no_wrap": True}),
+        expand=True,
+    )
     for runtime in runtimes:
         table.add_row(
             runtime.id or "-",
@@ -40,4 +40,4 @@ def print_python_table(runtimes):
             runtime.source,
             str(runtime.path),
         )
-    _console().print(table)
+    ui.console().print(table)

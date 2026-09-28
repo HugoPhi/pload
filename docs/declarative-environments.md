@@ -276,16 +276,20 @@ quitting or `--json` does not.
 `pload apply` first prints the complete persisted plan table. It then uses
 compact Docker-style progress rows: every exact package starts with its selected
 method in brackets (`[cache]`, `[index-exact]`, `[repository]`, and so on),
-followed by the package, source, Rich's bounded adaptive-width progress bar and
-real byte counts. The bar consumes the terminal width still available after the
-useful text columns, so wide terminals get a substantially longer bar without
-breaking narrow ones. Direct artifact downloads read in 16 KiB chunks and
+followed by the package, Rich's bounded adaptive-width progress bar and real
+byte counts. Source descriptions and status prose are omitted from the row
+because the saved plan table immediately above already identifies the resource.
+The bar consumes the terminal width still available after the useful text
+columns, so wide terminals get a substantially longer bar without breaking
+narrow ones. Direct artifact downloads read in 16 KiB chunks and
 publish real byte counts at up to 30 updates per second; this keeps interactive
 motion fluid without inventing intermediate progress. Local repositories stream
 their copied bytes, while SSH repositories stream the remote object into the
 local destination at the same refresh cadence. Redirected output coalesces those
-updates into stable plain-text
-rows without terminal control characters. This makes the saved decision and
+updates into stable plain-text rows without terminal control characters. Cache
+routes report bytes as their SHA-256 content is actually read; configuration
+artifacts and external caches report bytes while copying and hashing. This makes
+the saved decision and
 its execution visible in one command without allowing apply to recalculate the
 plan.
 

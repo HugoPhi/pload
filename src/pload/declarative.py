@@ -64,6 +64,56 @@ def _duration(value):
     return f"{value * 1000:.0f} ms" if value < 1 else f"{value:.2f} s"
 
 
+def _report_transfer(progress, label, received, total):
+    if progress:
+        progress(f"DOWNLOAD\t{label}\t{received}\t{total}")
+
+
+def _digest_with_progress(path, label, progress=None):
+    """Hash a local artifact while reporting bytes actually verified."""
+    path = Path(path)
+    total = path.stat().st_size
+    checksum = hashlib.sha256()
+    received = 0
+    last_reported_at = time.monotonic()
+    with path.open("rb") as stream:
+        while True:
+            chunk = stream.read(1024 * 1024)
+            if not chunk:
+                break
+            checksum.update(chunk)
+            received += len(chunk)
+            now = time.monotonic()
+            if now - last_reported_at >= DOWNLOAD_PROGRESS_INTERVAL:
+                _report_transfer(progress, label, received, total)
+                last_reported_at = now
+    _report_transfer(progress, label, received, total)
+    return checksum.hexdigest()
+
+
+def _copy_with_progress(source, destination, label, progress=None):
+    """Copy and hash a local artifact while reporting real processed bytes."""
+    source = Path(source)
+    total = source.stat().st_size
+    checksum = hashlib.sha256()
+    received = 0
+    last_reported_at = time.monotonic()
+    with source.open("rb") as input_stream, Path(destination).open("wb") as output:
+        while True:
+            chunk = input_stream.read(1024 * 1024)
+            if not chunk:
+                break
+            output.write(chunk)
+            checksum.update(chunk)
+            received += len(chunk)
+            now = time.monotonic()
+            if now - last_reported_at >= DOWNLOAD_PROGRESS_INTERVAL:
+                _report_transfer(progress, label, received, total)
+                last_reported_at = now
+    _report_transfer(progress, label, received, total)
+    return checksum.hexdigest()
+
+
 def normalized_name(value):
     return re.sub(r"[-_.]+", "-", value).lower()
 
@@ -624,7 +674,10 @@ class ArtifactRepository:
         temporary = destination.with_name(destination.name + "." + uuid.uuid4().hex)
         command = [
             "ssh", *cls.SSH_OPTIONS, host,
-            f"cat -- {shlex.quote(remote)}",
+            (
+                f"size=$(wc -c < {shlex.quote(remote)}) && "
+                f"printf '%s\\n' \"$size\" && cat -- {shlex.quote(remote)}"
+            ),
         ]
         try:
             process = subprocess.Popen(
@@ -636,6 +689,12 @@ class ArtifactRepository:
         started = time.monotonic()
         last_reported_at = started
         try:
+            size_line = process.stdout.readline(64)
+            try:
+                announced_size = int(size_line.strip())
+            except (TypeError, ValueError) as exc:
+                raise PloadError("ssh repository returned an invalid object size") from exc
+            total = announced_size or expected_size
             with temporary.open("wb") as output:
                 while True:
                     reader = (
@@ -654,7 +713,7 @@ class ArtifactRepository:
                         raise PloadError("ssh artifact download timed out after 300 seconds")
                     if progress and (now - last_reported_at
                                      >= DOWNLOAD_PROGRESS_INTERVAL):
-                        progress(received, expected_size)
+                        progress(received, total)
                         last_reported_at = now
             remaining = max(0.1, 300 - (time.monotonic() - started))
             try:
@@ -669,7 +728,7 @@ class ArtifactRepository:
             if returncode:
                 raise PloadError(f"ssh failed: {stderr.strip() or returncode}")
             if progress:
-                progress(received, expected_size or received)
+                progress(received, total or received)
             if digest(temporary) != checksum:
                 raise PloadError("retrieved artifact checksum mismatch")
             temporary.replace(destination)
@@ -1695,7 +1754,9 @@ class DeclarativeEnvironmentManager:
                         source = Path(selected["location"])
                         if progress:
                             progress(f"SOURCE\t{label}\tusing cache {source}")
-                        if not source.is_file() or digest(source) != artifact["sha256"]:
+                        if not source.is_file() or _digest_with_progress(
+                            source, label, progress,
+                        ) != artifact["sha256"]:
                             raise PloadError(
                                 f"planned route failed for {label} (cache): "
                                 "selected cache artifact changed or disappeared; "
@@ -2007,20 +2068,25 @@ with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as bundle:
         progress=None,
     ):
         artifact = selected["artifact"]
+        label = f"{package['name']}=={package['version']}"
         if selected["method"] == "configuration-artifact":
-            shutil.copyfile(selected["location"], destination)
+            checksum = _copy_with_progress(
+                selected["location"], destination, label, progress,
+            )
+            if checksum != artifact["sha256"]:
+                raise PloadError("selected configuration artifact changed or disappeared")
         elif selected["method"] == "external-cache":
             source = Path(selected["location"])
-            if not source.is_file() or digest(source) != artifact["sha256"]:
+            if not source.is_file():
                 raise PloadError("selected external cache artifact changed or disappeared")
-            shutil.copyfile(source, destination)
+            checksum = _copy_with_progress(source, destination, label, progress)
+            if checksum != artifact["sha256"]:
+                raise PloadError("selected external cache artifact changed or disappeared")
         elif selected["method"] == "repository":
             transfer_progress = None
             if progress:
-                label = f"{package['name']}=={package['version']}"
-
                 def transfer_progress(received, total):
-                    progress(f"DOWNLOAD\t{label}\t{received}\t{total}")
+                    _report_transfer(progress, label, received, total)
 
             ArtifactRepository.fetch(
                 data["repositories"][selected["location"]], artifact["sha256"],

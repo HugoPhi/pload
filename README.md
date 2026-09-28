@@ -103,12 +103,15 @@ it never re-resolves, changes route, falls back, or uploads packages. Set
 chooser; strict per-package exceptions live under `[plan.packages.NAME]`.
 `apply` prints the saved plan first, then compact Docker-style progress rows.
 Each package is prefixed by its route, such as `[cache]`, `[index-exact]`, or
-`[repository]`, alongside its source and real download byte progress. The bar
+`[repository]`, followed only by its byte progress. Verbose grey source/status
+suffixes are intentionally omitted because the saved plan above already names
+the selected resource. The bar
 uses Rich's standard adaptive-width bar with explicit start and end boundaries,
 so it grows naturally on wider terminals without another progress dependency.
 Index and repository transfers report real received bytes at up to 30 updates
 per second. SSH repository downloads stream the remote object directly;
-redirected logs remain coalesced instead of flooding CI.
+cache routes report bytes while verifying SHA-256 instead of turning green
+before visible work. Redirected logs remain coalesced instead of flooding CI.
 
 Use `pload apply --local` (or `-l`) for a project-local environment. It creates
 `.venv` beside the selected `pload.toml`, matching the layout produced by

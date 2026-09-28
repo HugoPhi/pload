@@ -269,10 +269,9 @@ def test_apply_prints_saved_plan_before_package_progress(tmp_path, monkeypatch, 
 
     assert events == ["loaded", "printed-plan", "apply"]
     output = capsys.readouterr().out
-    normalized = " ".join(output.split())
     assert "[index-exact]" in output
     assert "numpy==2.0.2" in output
-    assert "downloading from https://files.invalid/numpy.whl" in normalized
+    assert "downloading from https://files.invalid/numpy.whl" not in output
     assert "8.0 MiB / 16.0 MiB" in output
 
 
@@ -296,7 +295,7 @@ def test_apply_progress_uses_one_adaptive_rich_row_per_package():
     assert "━" in progress_line
     assert "░" not in rendered
     assert "8.0 MiB / 16.0 MiB" in rendered
-    assert "downloading" in rendered
+    assert "downloading from" not in rendered
 
 
 def test_apply_local_targets_venv_beside_manifest(tmp_path, monkeypatch):

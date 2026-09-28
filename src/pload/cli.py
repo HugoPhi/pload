@@ -567,7 +567,6 @@ class ApplyProgress:
             ),
             TextColumn("]", style="dim", markup=False),
             TextColumn("{task.fields[amount]}", style="cyan", markup=False),
-            TextColumn("{task.fields[status]}", style="dim", markup=False),
             console=self.console,
             transient=False,
             expand=True,
@@ -608,11 +607,6 @@ class ApplyProgress:
             self.details[package]["status"] = status
             if self.interactive:
                 self.progress.update(self.tasks[package], status=status)
-            else:
-                detail = self.details[package]
-                self.console.print(
-                    Text(f"{detail['tag']:<24} {package}  {status}")
-                )
         elif kind == "DOWNLOAD":
             _, package, received, expected = parts
             received, expected = int(received), int(expected)

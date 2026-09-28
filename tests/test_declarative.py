@@ -374,11 +374,15 @@ def test_cache_plan_applies_without_package_network_access(tmp_path, monkeypatch
         return original_execute(command, *args, **kwargs)
 
     monkeypatch.setattr(declarative_module, "execute", reject_package_network)
-    restored = manager.apply(manifest)
+    progress = []
+    restored = manager.apply(manifest, progress=progress.append)
     output = original_execute([
         config.get_pip_command(restored)[0], "-c", "import pload_demo; print(pload_demo.answer)",
     ])
     assert output == "42"
+    assert any(
+        event.startswith("DOWNLOAD\tpload-demo==1.0\t") for event in progress
+    )
 
 
 def test_apply_can_materialize_project_local_environment(tmp_path):
@@ -961,7 +965,7 @@ def test_local_repository_fetch_streams_real_byte_progress(tmp_path, monkeypatch
         destination,
         tmp_path,
         progress=lambda received, total: events.append((received, total)),
-        expected_size=len(payload),
+        expected_size=0,
     )
 
     assert len(events) >= 3
@@ -977,6 +981,9 @@ def test_ssh_repository_fetch_streams_real_bytes(tmp_path, monkeypatch):
     class StreamingOutput:
         def __init__(self):
             self.parts = 0
+
+        def readline(self, size):
+            return f"{len(payload)}\n".encode()
 
         def read1(self, size):
             if self.parts < 4:
@@ -1011,7 +1018,7 @@ def test_ssh_repository_fetch_streams_real_bytes(tmp_path, monkeypatch):
         destination,
         tmp_path,
         progress=lambda received, total: events.append((received, total)),
-        expected_size=len(payload),
+        expected_size=0,
     )
 
     assert [received for received, _ in events[:4]] == [

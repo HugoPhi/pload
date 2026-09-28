@@ -65,6 +65,8 @@ Pre-release: `1.2.0a1`
   up to 30 updates per second while coalescing non-interactive logs.
 - Stream local repository copies and SSH object responses so repository routes
   report real byte progress instead of completing at once.
+- Remove grey source/status suffixes from progress rows. Cache verification and
+  local artifact copying now report actual processed bytes before completion.
 
 ### Removed
 

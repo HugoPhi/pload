@@ -13,7 +13,6 @@ import sys
 import tempfile
 import time
 import uuid
-import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -1840,7 +1839,9 @@ class DeclarativeEnvironmentManager:
                     execute(pip + ["install", "--no-index", "--no-deps"] + artifacts,
                             capture=False)
                 for package_plan in environment_copies:
-                    self._copy_distribution(package_plan, env, stage)
+                    self._copy_distribution(
+                        package_plan, env, stage, progress=progress,
+                    )
                     if progress:
                         progress(
                             f"PACKAGE_DONE\t{package_plan['name']}=="
@@ -2012,15 +2013,15 @@ class DeclarativeEnvironmentManager:
                     and data["policy"].get("reproducibility") != "compatible"):
                 raise PloadError("index-resolve is forbidden by exact reproducibility policy")
 
-    def _copy_distribution(self, package, target_environment, stage):
+    def _copy_distribution(self, package, target_environment, stage, progress=None):
         selected = package["selected"]
         source_environment = Path(selected["location"])
         source_python = source_environment / (
             "Scripts/python.exe" if os.name == "nt" else "bin/python"
         )
-        archive = stage / (normalized_name(package["name"]) + ".zip")
+        file_manifest = stage / (normalized_name(package["name"]) + ".files.json")
         script = r'''
-import hashlib, json, os, sys, sysconfig, zipfile
+import hashlib, json, os, sys, sysconfig
 from importlib import metadata
 name, version, fingerprint, output = sys.argv[1:]
 dist = metadata.distribution(name)
@@ -2041,13 +2042,12 @@ for item in dist.files or []:
         raise SystemExit('unsafe distribution path')
     if os.path.isfile(source):
         files.append((source, relative))
-with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as bundle:
-    for source, relative in files:
-        bundle.write(source, relative)
+with open(output, 'w', encoding='utf-8') as stream:
+    json.dump(files, stream)
 '''
         execute([
             str(source_python), "-c", script, package["name"], package["version"],
-            selected["fingerprint"], str(archive),
+            selected["fingerprint"], str(file_manifest),
         ])
         target_python = Path(target_environment) / (
             "Scripts/python.exe" if os.name == "nt" else "bin/python"
@@ -2056,12 +2056,39 @@ with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as bundle:
             str(target_python), "-c",
             "import sysconfig; print(sysconfig.get_path('purelib'))",
         ]))
-        with zipfile.ZipFile(archive) as bundle:
-            for member in bundle.infolist():
-                destination = (site_packages / member.filename).resolve()
-                if site_packages.resolve() not in destination.parents:
-                    raise PloadError("environment package contains an unsafe path")
-            bundle.extractall(site_packages)
+        try:
+            files = json.loads(file_manifest.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise PloadError("cannot read environment package file list") from exc
+        checked = []
+        total = 0
+        site_root = site_packages.resolve()
+        for source_value, relative in files:
+            source = Path(source_value)
+            destination = (site_root / relative).resolve()
+            if site_root not in destination.parents or not source.is_file():
+                raise PloadError("environment package contains an unsafe path")
+            size = source.stat().st_size
+            total += size
+            checked.append((source, destination))
+        label = f"{package['name']}=={package['version']}"
+        received = 0
+        last_reported_at = time.monotonic()
+        _report_transfer(progress, label, 0, total)
+        for source, destination in checked:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with source.open("rb") as input_stream, destination.open("wb") as output:
+                while True:
+                    chunk = input_stream.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    output.write(chunk)
+                    received += len(chunk)
+                    now = time.monotonic()
+                    if now - last_reported_at >= DOWNLOAD_PROGRESS_INTERVAL:
+                        _report_transfer(progress, label, received, total)
+                        last_reported_at = now
+        _report_transfer(progress, label, received, total)
 
     def _acquire(
         self, path, data, package, selected, destination, stage, interpreter,

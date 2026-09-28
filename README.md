@@ -111,7 +111,9 @@ so it grows naturally on wider terminals without another progress dependency.
 Index and repository transfers report real received bytes at up to 30 updates
 per second. SSH repository downloads stream the remote object directly;
 cache routes report bytes while verifying SHA-256 instead of turning green
-before visible work. Redirected logs remain coalesced instead of flooding CI.
+before visible work. Environment-copy routes validate the source `RECORD`, then
+report each byte copied from the compatible environment and finish green.
+Redirected logs remain coalesced instead of flooding CI.
 
 Use `pload apply --local` (or `-l`) for a project-local environment. It creates
 `.venv` beside the selected `pload.toml`, matching the layout produced by

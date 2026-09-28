@@ -298,6 +298,22 @@ def test_apply_progress_uses_one_adaptive_rich_row_per_package():
     assert "downloading from" not in rendered
 
 
+def test_environment_copy_progress_finishes_green():
+    stream = io.StringIO()
+    console = Console(
+        file=stream, force_terminal=True, color_system="standard", no_color=False,
+        width=120, height=5, _environ={},
+    )
+
+    with cli_module.ApplyProgress(console) as progress:
+        progress("PACKAGE\t1/1\tenvironment-copy\tdemo==1.0\t0")
+        progress("DOWNLOAD\tdemo==1.0\t0\t100")
+        progress("DOWNLOAD\tdemo==1.0\t100\t100")
+        progress("PACKAGE_DONE\tdemo==1.0\tcopied")
+
+    assert "\x1b[32m" in stream.getvalue()
+
+
 def test_apply_local_targets_venv_beside_manifest(tmp_path, monkeypatch):
     captured = {}
     manifest = tmp_path / "project" / "pload.toml"

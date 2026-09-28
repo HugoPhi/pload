@@ -67,6 +67,8 @@ Pre-release: `1.2.0a1`
   report real byte progress instead of completing at once.
 - Remove grey source/status suffixes from progress rows. Cache verification and
   local artifact copying now report actual processed bytes before completion.
+- Replace environment-copy's opaque zip/extract step with a validated file-list
+  stream that reports total and copied bytes and finishes with a green bar.
 
 ### Removed
 

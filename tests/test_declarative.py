@@ -507,11 +507,19 @@ def test_plan_reuses_package_from_compatible_pload_environment(tmp_path, monkeyp
         return original_execute(command, *args, **kwargs)
 
     monkeypatch.setattr(declarative_module, "execute", reject_package_network)
-    restored = manager.apply(manifest)
+    progress = []
+    restored = manager.apply(manifest, progress=progress.append)
     assert original_execute([
         config.get_pip_command(restored)[0], "-c",
         "import pload_demo; print(pload_demo.answer)",
     ]) == "42"
+    copy_events = [
+        event for event in progress
+        if event.startswith("DOWNLOAD\tpload-demo==1.0\t")
+    ]
+    assert copy_events
+    _, _, received, total = copy_events[-1].split("\t")
+    assert int(received) == int(total) > 0
 
 
 def test_plan_resolves_metadata_once_without_downloading_wheels(tmp_path, monkeypatch):

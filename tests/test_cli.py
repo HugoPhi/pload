@@ -248,7 +248,7 @@ def test_apply_prints_saved_plan_before_package_progress(tmp_path, monkeypatch, 
             events.append("loaded")
             return {"name": "demo"}
 
-        def apply(self, path, name, offline, progress):
+        def apply(self, path, name, offline, progress, target=None):
             events.append("apply")
             progress("PACKAGE\t1/1\tindex-exact\tnumpy==2.0.2\t16777216")
             progress(
@@ -291,9 +291,36 @@ def test_apply_progress_uses_one_docker_style_row_per_package():
     rendered = stream.getvalue()
     assert "[index-exact]" in rendered
     assert "numpy==2.0.2" in rendered
-    assert "[█████████░░░░░░░░░]" in rendered
+    assert "[█ █ █ █ █" in rendered
+    assert "░" not in rendered
+    progress_line = next(line for line in rendered.splitlines() if "8.0 MiB" in line)
+    assert "]" in progress_line
     assert "8.0 MiB / 16.0 MiB" in rendered
     assert "downloading" in rendered
+
+
+def test_apply_local_targets_venv_beside_manifest(tmp_path, monkeypatch):
+    captured = {}
+    manifest = tmp_path / "project" / "pload.toml"
+
+    class FakeManager:
+        def __init__(self, config):
+            pass
+
+        def saved_plan(self, path):
+            return {"packages": []}
+
+        def apply(self, path, name, offline, progress, target=None):
+            captured["target"] = target
+            return target
+
+    monkeypatch.setattr(
+        declarative_module, "DeclarativeEnvironmentManager", FakeManager
+    )
+    monkeypatch.setattr(cli_module, "print_declarative_plan", lambda plan: None)
+
+    assert main(["apply", str(manifest), "--local"]) == 0
+    assert captured["target"] == manifest.parent / ".venv"
 
 
 def test_new_without_options_uses_guided_creation(tmp_path, monkeypatch):

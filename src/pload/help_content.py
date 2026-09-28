@@ -429,6 +429,7 @@ GUIDES[("apply",)] = r"""
 ```console
 pload apply
 pload apply project.pload.toml -n project-copy
+pload apply --local
 pload apply --offline
 ```
 
@@ -443,6 +444,12 @@ downloads from the locked URL even if the same wheel is already cached; the
 verified wheel is then installed locally with package networking disabled.
 Reapplying the same configuration is idempotent; an
 existing environment with different state is never silently overwritten.
+
+`--local` (or `-l`) creates `.venv` beside the selected configuration file,
+giving declarative projects the same local-environment layout as `pload init`.
+The location follows the configuration file rather than the caller's current
+working directory, so `pload apply path/to/pload.toml --local` reliably targets
+`path/to/.venv`.
 """
 GUIDES[("repo",)] = r"""
 # Configure reusable artifact providers

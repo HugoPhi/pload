@@ -23,6 +23,7 @@ The normal workflow is:
 ```console
 pload plan pload.toml       # resolve metadata, inventory and choose routes
 pload apply pload.toml      # execute only the saved plan
+pload apply --local         # execute into .venv beside pload.toml
 ```
 
 By default, `plan` opens a route chooser for only the direct requirements the
@@ -275,10 +276,18 @@ quitting or `--json` does not.
 `pload apply` first prints the complete persisted plan table. It then uses
 compact Docker-style progress rows: every exact package starts with its selected
 method in brackets (`[cache]`, `[index-exact]`, `[repository]`, and so on),
-followed by the package, source, progress bar and real byte counts. Redirected
-output uses stable plain-text rows without terminal control characters. This
-makes the saved decision and its execution visible in one command without
-allowing apply to recalculate the plan.
+followed by the package, source, a bounded spaced-block progress bar and real
+byte counts. Completed cells are solid blocks separated by narrow terminal-cell
+gaps; unfinished cells remain blank. Redirected output uses stable plain-text
+rows without terminal control characters. This makes the saved decision and
+its execution visible in one command without allowing apply to recalculate the
+plan.
+
+By default apply creates a named managed environment. `pload apply --local`
+instead creates `.venv` beside the configuration file, matching `pload init`'s
+project-local layout while retaining the saved declarative plan. Placement is a
+CLI concern so the portable environment description remains independent of a
+particular checkout path.
 
 An unpinned configuration with a missing or stale lock has one additional job:
 it must determine exact versions and the transitive graph before routes have a

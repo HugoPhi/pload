@@ -1500,7 +1500,9 @@ class DeclarativeEnvironmentManager:
             raise PloadError("no valid reproduction route for: " + ", ".join(details))
         return path, data, plan
 
-    def apply(self, manifest_path, name=None, offline=False, progress=None):
+    def apply(
+        self, manifest_path, name=None, offline=False, progress=None, target=None,
+    ):
         path, data, plan = self._load_saved_execution_plan(manifest_path)
         python_method = plan["python"].get("method")
         if offline and python_method == "install-python":
@@ -1521,9 +1523,11 @@ class DeclarativeEnvironmentManager:
             raise PloadError(f"unsupported Python acquisition method: {python_method}")
         self._check_runtime(interpreter, data["environment"])
         target_name = name or data["name"]
+        target_path = Path(target).expanduser().resolve() if target else None
+        target_reference = str(target_path) if target_path else target_name
         expected_state = manifest_digest(data)
         try:
-            existing = VenvManager(self.config).resolve_existing(target_name)
+            existing = VenvManager(self.config).resolve_existing(target_reference)
         except PloadError:
             existing = None
         if existing:
@@ -1632,7 +1636,7 @@ class DeclarativeEnvironmentManager:
             if progress:
                 progress(f"STAGE creating environment {target_name}")
             env = venvs.create_venv(
-                version=str(interpreter), name=target_name,
+                version=str(interpreter), name=target_name, target=target_path,
                 description=f"Applied from {path.name}",
             )
             try:
@@ -1682,7 +1686,7 @@ class DeclarativeEnvironmentManager:
                 )
                 return env
             except (OSError, PloadError):
-                venvs.remove_venv(target_name)
+                venvs.remove_venv(str(env))
                 raise
 
     def save_plan(self, manifest_path, plan):

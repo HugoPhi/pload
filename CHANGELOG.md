@@ -57,6 +57,10 @@ Pre-release: `1.2.0a1`
   instead of appearing frozen while network or SSH work is captured.
 - Refuse `apply` when the lock is absent or stale instead of resolving and
   downloading implicitly.
+- Add `pload apply --local` / `-l` to reproduce a saved plan into `.venv`
+  beside its configuration file, matching `pload init` project layout.
+- Render apply transfers as bounded, spaced solid-block progress bars with
+  blank unfinished cells and the selected acquisition method in brackets.
 
 ### Removed
 

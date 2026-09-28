@@ -8,7 +8,7 @@ from questionary import Choice
 from rich import box
 from rich.panel import Panel
 from rich.progress import Progress, ProgressColumn, TextColumn
-from rich.table import Table
+from rich.table import Column, Table
 from rich.text import Text
 
 from pload import __version__, ui
@@ -327,7 +327,14 @@ Aliases: system=sys, managed=uv""",
     )
     apply.add_argument("file", nargs="?", default="pload.toml",
                        help="environment configuration (default: pload.toml)")
-    apply.add_argument("--name", "-n", help="override the materialized environment name")
+    apply_target = apply.add_mutually_exclusive_group()
+    apply_target.add_argument(
+        "--name", "-n", help="override the managed environment name"
+    )
+    apply_target.add_argument(
+        "--local", "-l", action="store_true",
+        help="create .venv beside the configuration file",
+    )
     apply.add_argument("--offline", "-o", action="store_true",
                        help="forbid internet access; configured local/SSH repositories remain usable")
     repo = subparsers.add_parser("repo", help="manage resource providers",
@@ -541,18 +548,20 @@ def _progress_size(value):
 
 
 class DockerBarColumn(ProgressColumn):
-    """Fixed-width block bar with visible start and end boundaries."""
+    """Fixed-width, spaced block bar with visible start and end boundaries."""
 
-    def __init__(self, width=18):
-        super().__init__()
+    def __init__(self, width=10):
+        super().__init__(table_column=Column(width=width * 2 + 1, no_wrap=True))
         self.width = width
 
     def render(self, task):
         ratio = 0 if not task.total else min(max(task.completed / task.total, 0), 1)
         complete = int(ratio * self.width)
         bar = Text("[", style="dim")
-        bar.append("█" * complete, style="green")
-        bar.append("░" * (self.width - complete), style="dim")
+        for cell in range(self.width):
+            if cell:
+                bar.append(" ")
+            bar.append("█" if cell < complete else " ", style="green")
         bar.append("]", style="dim")
         return bar
 
@@ -568,7 +577,7 @@ class ApplyProgress:
         self.progress = Progress(
             TextColumn("{task.fields[tag]}", style="bold cyan", markup=False),
             TextColumn("{task.fields[package]}", style="bold white", markup=False),
-            DockerBarColumn(width=18),
+            DockerBarColumn(width=10),
             TextColumn("{task.fields[amount]}", style="cyan", markup=False),
             TextColumn("{task.fields[status]}", style="dim", markup=False),
             console=self.console,
@@ -1078,9 +1087,13 @@ def run(argv=None):
             apply_console = ui.console()
             saved_plan = manager.saved_plan(args.file)
             print_declarative_plan(saved_plan)
+            target = None
+            if args.local:
+                target = Path(args.file).expanduser().resolve().parent / ".venv"
             with ApplyProgress(apply_console) as apply_progress:
                 restored = manager.apply(
                     args.file, args.name, args.offline,
+                    target=target,
                     progress=apply_progress,
                 )
             print(restored)

@@ -88,6 +88,7 @@ pload manages `.pload_lock.toml` (exact versions and artifacts) and
 pload describe v2 -o pload.toml
 pload plan pload.toml
 pload apply pload.toml
+pload apply --local         # reproduce into .venv beside pload.toml
 ```
 
 `plan` fetches only index pages and independent package metadata—never wheel
@@ -102,7 +103,12 @@ it never re-resolves, changes route, falls back, or uploads packages. Set
 chooser; strict per-package exceptions live under `[plan.packages.NAME]`.
 `apply` prints the saved plan first, then compact Docker-style progress rows.
 Each package is prefixed by its route, such as `[cache]`, `[index-exact]`, or
-`[repository]`, alongside its source and real download byte progress.
+`[repository]`, alongside its source and real download byte progress. The bar
+uses bounded, spaced solid blocks; unfinished cells remain blank.
+
+Use `pload apply --local` (or `-l`) for a project-local environment. It creates
+`.venv` beside the selected `pload.toml`, matching the layout produced by
+`pload init` while executing the saved declarative plan exactly.
 
 Back up a special or slow wheel only when you explicitly request it:
 

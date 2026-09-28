@@ -379,6 +379,32 @@ def test_cache_plan_applies_without_package_network_access(tmp_path, monkeypatch
     assert output == "42"
 
 
+def test_apply_can_materialize_project_local_environment(tmp_path):
+    config = ConfigManager(home=tmp_path / "home")
+    config.get_python_path = lambda version=None: Path(sys.executable)
+    data = simple_manifest("exact")
+    data["environment"].update({
+        "python": platform.python_version(),
+        "implementation": sys.implementation.name,
+        "system": platform.system(),
+        "machine": platform.machine(),
+        "dependencies": [],
+    })
+    data["package"] = []
+    project = tmp_path / "project"
+    project.mkdir()
+    manifest = project / "pload.toml"
+    write_configuration(manifest, data, with_lock=False)
+    manager = DeclarativeEnvironmentManager(config)
+    plan_and_save(manager, manifest)
+
+    restored = manager.apply(manifest, target=project / ".venv")
+
+    assert restored == project / ".venv"
+    assert (restored / "pyvenv.cfg").is_file()
+    assert manager.apply(manifest, target=project / ".venv") == restored
+
+
 def test_plan_discovers_and_apply_uses_exact_external_cache(tmp_path, monkeypatch):
     external_cache = tmp_path / "pip-cache"
     wheel = tiny_wheel(external_cache)

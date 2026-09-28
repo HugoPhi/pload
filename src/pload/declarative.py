@@ -8,6 +8,7 @@ import re
 import shlex
 import shutil
 import socket
+import subprocess
 import sys
 import tempfile
 import time
@@ -596,13 +597,94 @@ class ArtifactRepository:
             ], timeout=75)
 
     @classmethod
-    def fetch(cls, spec, checksum, destination, base):
-        cls.fetch_many(spec, [(checksum, destination)], base)
+    def fetch(
+        cls, spec, checksum, destination, base, progress=None, expected_size=0,
+    ):
+        if spec["kind"] == "ssh":
+            cls._fetch_ssh_stream(
+                spec, checksum, Path(destination), progress, expected_size,
+            )
+            return
+        callback = None
+        if progress:
+            callback = lambda _checksum, received, total: progress(received, total)
+        cls.fetch_many(
+            spec, [(checksum, destination)], base,
+            progress=callback, sizes={checksum: expected_size},
+        )
 
     @classmethod
-    def fetch_many(cls, spec, artifacts, base):
+    def _fetch_ssh_stream(
+        cls, spec, checksum, destination, progress=None, expected_size=0,
+    ):
+        """Stream one SSH object so received bytes are visible immediately."""
+        host, root = RepositoryManager.ssh_location(spec["location"])
+        remote = root + "/objects/" + checksum
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = destination.with_name(destination.name + "." + uuid.uuid4().hex)
+        command = [
+            "ssh", *cls.SSH_OPTIONS, host,
+            f"cat -- {shlex.quote(remote)}",
+        ]
+        try:
+            process = subprocess.Popen(
+                command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+        except OSError as exc:
+            raise PloadError(f"cannot run ssh: {exc}") from exc
+        received = 0
+        started = time.monotonic()
+        last_reported_at = started
+        try:
+            with temporary.open("wb") as output:
+                while True:
+                    reader = (
+                        process.stdout.read1
+                        if hasattr(process.stdout, "read1")
+                        else process.stdout.read
+                    )
+                    chunk = reader(DOWNLOAD_CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    output.write(chunk)
+                    received += len(chunk)
+                    now = time.monotonic()
+                    if now - started > 300:
+                        process.kill()
+                        raise PloadError("ssh artifact download timed out after 300 seconds")
+                    if progress and (now - last_reported_at
+                                     >= DOWNLOAD_PROGRESS_INTERVAL):
+                        progress(received, expected_size)
+                        last_reported_at = now
+            remaining = max(0.1, 300 - (time.monotonic() - started))
+            try:
+                returncode = process.wait(timeout=remaining)
+            except subprocess.TimeoutExpired as exc:
+                process.kill()
+                process.wait()
+                raise PloadError(
+                    "ssh artifact download timed out after 300 seconds"
+                ) from exc
+            stderr = process.stderr.read().decode(errors="replace") if process.stderr else ""
+            if returncode:
+                raise PloadError(f"ssh failed: {stderr.strip() or returncode}")
+            if progress:
+                progress(received, expected_size or received)
+            if digest(temporary) != checksum:
+                raise PloadError("retrieved artifact checksum mismatch")
+            temporary.replace(destination)
+        except Exception:
+            temporary.unlink(missing_ok=True)
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            raise
+
+    @classmethod
+    def fetch_many(cls, spec, artifacts, base, progress=None, sizes=None):
         """Fetch multiple content-addressed objects through one SFTP session."""
         artifacts = [(checksum, Path(destination)) for checksum, destination in artifacts]
+        sizes = sizes or {}
         if not artifacts:
             return
         for _, destination in artifacts:
@@ -610,10 +692,27 @@ class ArtifactRepository:
         if spec["kind"] == "local":
             root = cls._local_root(spec, base) / "objects"
             for checksum, destination in artifacts:
+                source = root / checksum
                 temporary = destination.with_name(
                     destination.name + "." + uuid.uuid4().hex
                 )
-                shutil.copyfile(root / checksum, temporary)
+                expected = sizes.get(checksum) or source.stat().st_size
+                received = 0
+                last_reported_at = time.monotonic()
+                with source.open("rb") as input_stream, temporary.open("wb") as output:
+                    while True:
+                        chunk = input_stream.read(DOWNLOAD_CHUNK_SIZE)
+                        if not chunk:
+                            break
+                        output.write(chunk)
+                        received += len(chunk)
+                        now = time.monotonic()
+                        if progress and (now - last_reported_at
+                                         >= DOWNLOAD_PROGRESS_INTERVAL):
+                            progress(checksum, received, expected)
+                            last_reported_at = now
+                if progress:
+                    progress(checksum, received, expected)
                 if digest(temporary) != checksum:
                     temporary.unlink(missing_ok=True)
                     raise PloadError("retrieved artifact checksum mismatch")
@@ -622,19 +721,50 @@ class ArtifactRepository:
         host, root = RepositoryManager.ssh_location(spec["location"])
         with tempfile.TemporaryDirectory(prefix="pload-fetch-") as temporary:
             stage = Path(temporary)
+            batch = stage / "commands.sftp"
             commands = []
             for checksum, _ in artifacts:
                 commands.append(
                     f"get {root}/objects/{checksum} {stage / checksum}"
                 )
-            execute(
-                ["sftp", "-q", "-b", "-", *cls.SSH_OPTIONS, host],
-                timeout=300, input_text="\n".join(commands) + "\n",
-            )
+            batch.write_text("\n".join(commands) + "\n", encoding="utf-8")
+            command = ["sftp", "-q", "-b", str(batch), *cls.SSH_OPTIONS, host]
+            try:
+                process = subprocess.Popen(
+                    command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                )
+            except OSError as exc:
+                raise PloadError(f"cannot run sftp: {exc}") from exc
+            started = time.monotonic()
+            last_sizes = {checksum: -1 for checksum, _ in artifacts}
+            while process.poll() is None:
+                now = time.monotonic()
+                if now - started > 300:
+                    process.kill()
+                    process.wait()
+                    raise PloadError("sftp timed out after 300 seconds")
+                if progress:
+                    for checksum, _ in artifacts:
+                        downloaded = stage / checksum
+                        received = downloaded.stat().st_size if downloaded.is_file() else 0
+                        if received != last_sizes[checksum]:
+                            progress(checksum, received, sizes.get(checksum, 0))
+                            last_sizes[checksum] = received
+                time.sleep(DOWNLOAD_PROGRESS_INTERVAL)
+            stdout = process.stdout.read() if process.stdout else ""
+            stderr = process.stderr.read() if process.stderr else ""
+            if process.returncode:
+                detail = (stderr or stdout).strip()
+                raise PloadError(f"sftp failed: {detail or process.returncode}")
             for checksum, destination in artifacts:
                 downloaded = stage / checksum
                 if not downloaded.is_file() or digest(downloaded) != checksum:
                     raise PloadError("retrieved artifact checksum mismatch")
+                if progress:
+                    progress(
+                        checksum, downloaded.stat().st_size,
+                        sizes.get(checksum) or downloaded.stat().st_size,
+                    )
                 temporary_destination = destination.with_name(
                     destination.name + "." + uuid.uuid4().hex
                 )
@@ -1885,9 +2015,17 @@ with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as bundle:
                 raise PloadError("selected external cache artifact changed or disappeared")
             shutil.copyfile(source, destination)
         elif selected["method"] == "repository":
+            transfer_progress = None
+            if progress:
+                label = f"{package['name']}=={package['version']}"
+
+                def transfer_progress(received, total):
+                    progress(f"DOWNLOAD\t{label}\t{received}\t{total}")
+
             ArtifactRepository.fetch(
                 data["repositories"][selected["location"]], artifact["sha256"],
-                destination, path.parent,
+                destination, path.parent, progress=transfer_progress,
+                expected_size=artifact.get("size", 0),
             )
         elif selected["method"] == "index-exact":
             if artifact.get("url"):

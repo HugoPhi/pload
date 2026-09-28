@@ -63,6 +63,8 @@ Pre-release: `1.2.0a1`
   explicit boundaries and the acquisition method in brackets.
 - Stream direct downloads in 16 KiB chunks and report measured byte progress at
   up to 30 updates per second while coalescing non-interactive logs.
+- Stream local repository copies and SSH object responses so repository routes
+  report real byte progress instead of completing at once.
 
 ### Removed
 

@@ -1,3 +1,4 @@
+import hashlib
 import io
 import platform
 import shutil
@@ -11,6 +12,7 @@ from packaging.tags import platform_tags
 import pload.declarative as declarative_module
 from pload.cli import build_parser, main, shell_script
 from pload.declarative import (
+    ArtifactRepository,
     DeclarativeEnvironmentManager,
     dump_lock,
     dump_manifest,
@@ -938,6 +940,84 @@ def test_exact_download_reports_frequent_real_byte_progress(tmp_path, monkeypatc
     downloads = [event for event in events if event.startswith("DOWNLOAD\t")]
     assert len(downloads) >= 3
     assert downloads[-1].split("\t")[2:] == [str(len(payload)), str(len(payload))]
+    assert destination.read_bytes() == payload
+
+
+def test_local_repository_fetch_streams_real_byte_progress(tmp_path, monkeypatch):
+    payload = b"r" * (declarative_module.DOWNLOAD_CHUNK_SIZE * 4)
+    checksum = hashlib.sha256(payload).hexdigest()
+    repository = tmp_path / "repository"
+    source = repository / "objects" / checksum
+    source.parent.mkdir(parents=True)
+    source.write_bytes(payload)
+    ticks = iter((0, 0.04, 0.08, 0.12, 0.16))
+    monkeypatch.setattr(declarative_module.time, "monotonic", lambda: next(ticks))
+    destination = tmp_path / "downloaded.whl"
+    events = []
+
+    ArtifactRepository.fetch(
+        {"kind": "local", "location": str(repository)},
+        checksum,
+        destination,
+        tmp_path,
+        progress=lambda received, total: events.append((received, total)),
+        expected_size=len(payload),
+    )
+
+    assert len(events) >= 3
+    assert events[-1] == (len(payload), len(payload))
+    assert destination.read_bytes() == payload
+
+
+def test_ssh_repository_fetch_streams_real_bytes(tmp_path, monkeypatch):
+    chunk = b"s" * declarative_module.DOWNLOAD_CHUNK_SIZE
+    payload = chunk * 4
+    checksum = hashlib.sha256(payload).hexdigest()
+
+    class StreamingOutput:
+        def __init__(self):
+            self.parts = 0
+
+        def read1(self, size):
+            if self.parts < 4:
+                self.parts += 1
+                return chunk
+            return b""
+
+    class StreamingSsh:
+        def __init__(self, command, stdout, stderr):
+            self.stdout = StreamingOutput()
+            self.stderr = io.BytesIO()
+            self.returncode = 0
+
+        def poll(self):
+            return 0
+
+        def kill(self):
+            self.returncode = -1
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+    monkeypatch.setattr(declarative_module.subprocess, "Popen", StreamingSsh)
+    ticks = iter((0, 0.04, 0.08, 0.12, 0.16, 0.20))
+    monkeypatch.setattr(declarative_module.time, "monotonic", lambda: next(ticks))
+    events = []
+    destination = tmp_path / "ssh-download.whl"
+
+    ArtifactRepository.fetch(
+        {"kind": "ssh", "location": "example:/repository"},
+        checksum,
+        destination,
+        tmp_path,
+        progress=lambda received, total: events.append((received, total)),
+        expected_size=len(payload),
+    )
+
+    assert [received for received, _ in events[:4]] == [
+        len(chunk), len(chunk) * 2, len(chunk) * 3, len(chunk) * 4,
+    ]
+    assert events[-1] == (len(payload), len(payload))
     assert destination.read_bytes() == payload
 
 

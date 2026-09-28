@@ -281,8 +281,10 @@ real byte counts. The bar consumes the terminal width still available after the
 useful text columns, so wide terminals get a substantially longer bar without
 breaking narrow ones. Direct artifact downloads read in 16 KiB chunks and
 publish real byte counts at up to 30 updates per second; this keeps interactive
-motion fluid without inventing intermediate progress. Redirected output
-coalesces those updates into stable plain-text
+motion fluid without inventing intermediate progress. Local repositories stream
+their copied bytes, while SSH repositories stream the remote object into the
+local destination at the same refresh cadence. Redirected output coalesces those
+updates into stable plain-text
 rows without terminal control characters. This makes the saved decision and
 its execution visible in one command without allowing apply to recalculate the
 plan.

@@ -61,6 +61,8 @@ Pre-release: `1.2.0a1`
   beside its configuration file, matching `pload init` project layout.
 - Render apply transfers with Rich's adaptive-width standard progress bar,
   explicit boundaries and the acquisition method in brackets.
+- Stream direct downloads in 16 KiB chunks and report measured byte progress at
+  up to 30 updates per second while coalescing non-interactive logs.
 
 ### Removed
 

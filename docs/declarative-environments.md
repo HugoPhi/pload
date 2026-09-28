@@ -279,7 +279,10 @@ method in brackets (`[cache]`, `[index-exact]`, `[repository]`, and so on),
 followed by the package, source, Rich's bounded adaptive-width progress bar and
 real byte counts. The bar consumes the terminal width still available after the
 useful text columns, so wide terminals get a substantially longer bar without
-breaking narrow ones. Redirected output uses stable plain-text
+breaking narrow ones. Direct artifact downloads read in 16 KiB chunks and
+publish real byte counts at up to 30 updates per second; this keeps interactive
+motion fluid without inventing intermediate progress. Redirected output
+coalesces those updates into stable plain-text
 rows without terminal control characters. This makes the saved decision and
 its execution visible in one command without allowing apply to recalculate the
 plan.

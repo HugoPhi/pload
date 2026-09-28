@@ -897,6 +897,50 @@ def test_apply_downloads_the_exact_url_saved_by_plan(tmp_path, monkeypatch):
     ]) == "42"
 
 
+def test_exact_download_reports_frequent_real_byte_progress(tmp_path, monkeypatch):
+    payload = b"x" * (declarative_module.DOWNLOAD_CHUNK_SIZE * 4)
+    source = tmp_path / "source.whl"
+    source.write_bytes(payload)
+    response = io.BytesIO(payload)
+    response.headers = {"Content-Length": str(len(payload))}
+    monkeypatch.setattr(
+        declarative_module, "urlopen", lambda request, timeout: response
+    )
+    ticks = iter((0, 0.04, 0.08, 0.12, 0.16))
+    monkeypatch.setattr(declarative_module.time, "monotonic", lambda: next(ticks))
+    config = ConfigManager(home=tmp_path / "home")
+    manager = DeclarativeEnvironmentManager(config)
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    destination = tmp_path / "output" / "demo.whl"
+    destination.parent.mkdir()
+    artifact = {
+        "filename": "demo.whl",
+        "sha256": digest(source),
+        "size": len(payload),
+        "url": "https://files.example.invalid/demo.whl",
+    }
+    package = {"name": "demo", "version": "1.0"}
+    selected = {"method": "index-exact", "location": "default", "artifact": artifact}
+    events = []
+
+    manager._acquire(
+        tmp_path / "pload.toml",
+        {"sources": {"default": {"url": "https://example.invalid/simple"}}},
+        package,
+        selected,
+        destination,
+        stage,
+        Path(sys.executable),
+        progress=events.append,
+    )
+
+    downloads = [event for event in events if event.startswith("DOWNLOAD\t")]
+    assert len(downloads) >= 3
+    assert downloads[-1].split("\t")[2:] == [str(len(payload)), str(len(payload))]
+    assert destination.read_bytes() == payload
+
+
 def test_offline_apply_rejects_saved_network_route(tmp_path, monkeypatch):
     config = ConfigManager(home=tmp_path / "home")
     config.get_python_path = lambda version=None: Path(sys.executable)

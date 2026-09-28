@@ -571,6 +571,7 @@ class ApplyProgress:
             console=self.console,
             transient=False,
             expand=True,
+            refresh_per_second=30,
         )
 
     def __enter__(self):
@@ -594,6 +595,7 @@ class ApplyProgress:
                 "counter": counter,
                 "method": method,
                 "total": total,
+                "last_plain_received": 0,
             }
             self.details[package] = detail
             if self.interactive:
@@ -625,7 +627,13 @@ class ApplyProgress:
                     amount=amount, status="downloading",
                 )
             else:
-                self.console.print(Text(f"{detail['tag']:<24} {package}  {amount}"))
+                final = expected and received >= expected
+                if (final or received - detail["last_plain_received"]
+                        >= 8 * 1024 * 1024):
+                    self.console.print(Text(
+                        f"{detail['tag']:<24} {package}  {amount}"
+                    ))
+                    detail["last_plain_received"] = received
         elif kind == "PACKAGE_DONE":
             _, package, status = parts
             detail = self.details[package]

@@ -46,6 +46,8 @@ from pload.snapshots import (
 PIN = re.compile(r"([A-Za-z0-9][A-Za-z0-9_.-]*)==([A-Za-z0-9][A-Za-z0-9_.+!-]*)")
 WHEEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.+!-]*\.whl")
 SHA256 = re.compile(r"[0-9a-f]{64}")
+DOWNLOAD_CHUNK_SIZE = 16 * 1024
+DOWNLOAD_PROGRESS_INTERVAL = 1 / 30
 
 
 def _human_size(value):
@@ -1902,21 +1904,22 @@ with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as bundle:
                         )
                         expected = int(expected) if expected else None
                         last_reported = 0
+                        last_reported_at = time.monotonic()
                         while True:
-                            chunk = response.read(1024 * 1024)
+                            chunk = response.read(DOWNLOAD_CHUNK_SIZE)
                             if not chunk:
                                 break
                             output.write(chunk)
                             received += len(chunk)
-                            if progress and (
-                                received - last_reported >= 8 * 1024 * 1024
-                                or (expected and received >= expected)
-                            ):
+                            now = time.monotonic()
+                            if progress and (now - last_reported_at
+                                             >= DOWNLOAD_PROGRESS_INTERVAL):
                                 progress(
                                     f"DOWNLOAD\t{package['name']}=={package['version']}\t"
                                     f"{received}\t{expected or 0}"
                                 )
                                 last_reported = received
+                                last_reported_at = now
                         if progress and received != last_reported:
                             progress(
                                 f"DOWNLOAD\t{package['name']}=={package['version']}\t"

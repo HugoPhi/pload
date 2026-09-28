@@ -106,6 +106,8 @@ Each package is prefixed by its route, such as `[cache]`, `[index-exact]`, or
 `[repository]`, alongside its source and real download byte progress. The bar
 uses Rich's standard adaptive-width bar with explicit start and end boundaries,
 so it grows naturally on wider terminals without another progress dependency.
+Network transfers report real downloaded bytes from 16 KiB reads at up to 30
+updates per second; redirected logs remain coalesced instead of flooding CI.
 
 Use `pload apply --local` (or `-l`) for a project-local environment. It creates
 `.venv` beside the selected `pload.toml`, matching the layout produced by

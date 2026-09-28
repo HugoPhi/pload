@@ -7,7 +7,7 @@ from pathlib import Path
 from questionary import Choice
 from rich import box
 from rich.panel import Panel
-from rich.progress import BarColumn, Progress, TextColumn
+from rich.progress import Progress, ProgressColumn, TextColumn
 from rich.table import Table
 from rich.text import Text
 
@@ -540,6 +540,23 @@ def _progress_size(value):
         size /= 1024
 
 
+class DockerBarColumn(ProgressColumn):
+    """Fixed-width block bar with visible start and end boundaries."""
+
+    def __init__(self, width=18):
+        super().__init__()
+        self.width = width
+
+    def render(self, task):
+        ratio = 0 if not task.total else min(max(task.completed / task.total, 0), 1)
+        complete = int(ratio * self.width)
+        bar = Text("[", style="dim")
+        bar.append("█" * complete, style="green")
+        bar.append("░" * (self.width - complete), style="dim")
+        bar.append("]", style="dim")
+        return bar
+
+
 class ApplyProgress:
     """Docker-like persistent package rows with a plain-text CI fallback."""
 
@@ -551,7 +568,7 @@ class ApplyProgress:
         self.progress = Progress(
             TextColumn("{task.fields[tag]}", style="bold cyan", markup=False),
             TextColumn("{task.fields[package]}", style="bold white", markup=False),
-            BarColumn(bar_width=18, complete_style="green", finished_style="green"),
+            DockerBarColumn(width=18),
             TextColumn("{task.fields[amount]}", style="cyan", markup=False),
             TextColumn("{task.fields[status]}", style="dim", markup=False),
             console=self.console,

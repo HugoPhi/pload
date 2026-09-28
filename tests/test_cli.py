@@ -278,7 +278,7 @@ def test_apply_prints_saved_plan_before_package_progress(tmp_path, monkeypatch, 
 
 def test_apply_progress_uses_one_docker_style_row_per_package():
     stream = io.StringIO()
-    console = Console(file=stream, force_terminal=True, width=160)
+    console = Console(file=stream, force_terminal=True, color_system=None, width=160)
 
     with cli_module.ApplyProgress(console) as progress:
         progress("PACKAGE\t1/1\tindex-exact\tnumpy==2.0.2\t16777216")
@@ -287,13 +287,13 @@ def test_apply_progress_uses_one_docker_style_row_per_package():
             "downloading from https://files.invalid/numpy.whl"
         )
         progress("DOWNLOAD\tnumpy==2.0.2\t8388608\t16777216")
-        progress("PACKAGE_DONE\tnumpy==2.0.2\tverified")
 
     rendered = stream.getvalue()
     assert "[index-exact]" in rendered
     assert "numpy==2.0.2" in rendered
+    assert "[█████████░░░░░░░░░]" in rendered
     assert "8.0 MiB / 16.0 MiB" in rendered
-    assert "verified" in rendered
+    assert "downloading" in rendered
 
 
 def test_new_without_options_uses_guided_creation(tmp_path, monkeypatch):

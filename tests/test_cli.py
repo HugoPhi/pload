@@ -292,7 +292,9 @@ def test_apply_progress_uses_one_adaptive_rich_row_per_package():
     assert "numpy==2.0.2" in rendered
     progress_line = next(line for line in rendered.splitlines() if "8.0 MiB" in line)
     assert "[" in progress_line and "]" in progress_line
-    assert "━" in progress_line
+    # Rich falls back to ASCII on legacy Windows consoles even when a terminal
+    # is forced, while Unix terminals use the Unicode heavy bar.
+    assert "━" in progress_line or "-" in progress_line
     assert "░" not in rendered
     assert "8.0 MiB / 16.0 MiB" in rendered
     assert "downloading from" not in rendered

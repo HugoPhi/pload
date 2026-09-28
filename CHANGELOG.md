@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## 1.2.0b1 - 2026-09-28
 
-Pre-release: `1.2.0a1`
+Feature-complete beta for the declarative environment workflow.
 
 ### Architecture reset
 
@@ -78,6 +78,8 @@ Pre-release: `1.2.0a1`
 
 ### Fixed
 
+- Accept Rich's documented ASCII progress-bar fallback on Windows consoles in
+  the cross-platform release test suite.
 - Keep an external environment's interpreter path intact when probing packages,
   instead of following its Python symlink out to the base installation.
 - Batch SSH repository inventory, publication and retrieval so environments with

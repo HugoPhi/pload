@@ -276,9 +276,10 @@ quitting or `--json` does not.
 `pload apply` first prints the complete persisted plan table. It then uses
 compact Docker-style progress rows: every exact package starts with its selected
 method in brackets (`[cache]`, `[index-exact]`, `[repository]`, and so on),
-followed by the package, source, a bounded square-cell progress bar and real
-byte counts. Completed cells use a square glyph with subtle built-in separation;
-unfinished cells remain blank. Redirected output uses stable plain-text
+followed by the package, source, Rich's bounded adaptive-width progress bar and
+real byte counts. The bar consumes the terminal width still available after the
+useful text columns, so wide terminals get a substantially longer bar without
+breaking narrow ones. Redirected output uses stable plain-text
 rows without terminal control characters. This makes the saved decision and
 its execution visible in one command without allowing apply to recalculate the
 plan.

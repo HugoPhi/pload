@@ -7,8 +7,8 @@ from pathlib import Path
 from questionary import Choice
 from rich import box
 from rich.panel import Panel
-from rich.progress import Progress, ProgressColumn, TextColumn
-from rich.table import Column, Table
+from rich.progress import BarColumn, Progress, TextColumn
+from rich.table import Table
 from rich.text import Text
 
 from pload import __version__, ui
@@ -547,27 +547,8 @@ def _progress_size(value):
         size /= 1024
 
 
-class DockerBarColumn(ProgressColumn):
-    """Fixed-width square bar with visible start and end boundaries."""
-
-    def __init__(self, width=10):
-        super().__init__(table_column=Column(width=width + 2, no_wrap=True))
-        self.width = width
-
-    def render(self, task):
-        ratio = 0 if not task.total else min(max(task.completed / task.total, 0), 1)
-        complete = int(ratio * self.width)
-        bar = Text("[", style="dim")
-        # U+25A0 has a small amount of built-in side bearing, so adjacent
-        # completed cells remain distinct without inserting full terminal cells.
-        bar.append("■" * complete, style="green")
-        bar.append(" " * (self.width - complete))
-        bar.append("]", style="dim")
-        return bar
-
-
 class ApplyProgress:
-    """Docker-like persistent package rows with a plain-text CI fallback."""
+    """Persistent Rich progress rows with a plain-text CI fallback."""
 
     def __init__(self, output=None):
         self.console = output or ui.console()
@@ -577,11 +558,19 @@ class ApplyProgress:
         self.progress = Progress(
             TextColumn("{task.fields[tag]}", style="bold cyan", markup=False),
             TextColumn("{task.fields[package]}", style="bold white", markup=False),
-            DockerBarColumn(width=10),
+            TextColumn("[", style="dim", markup=False),
+            BarColumn(
+                bar_width=None,
+                style="grey23",
+                complete_style="green",
+                finished_style="green",
+            ),
+            TextColumn("]", style="dim", markup=False),
             TextColumn("{task.fields[amount]}", style="cyan", markup=False),
             TextColumn("{task.fields[status]}", style="dim", markup=False),
             console=self.console,
             transient=False,
+            expand=True,
         )
 
     def __enter__(self):

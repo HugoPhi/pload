@@ -276,7 +276,7 @@ def test_apply_prints_saved_plan_before_package_progress(tmp_path, monkeypatch, 
     assert "8.0 MiB / 16.0 MiB" in output
 
 
-def test_apply_progress_uses_one_docker_style_row_per_package():
+def test_apply_progress_uses_one_adaptive_rich_row_per_package():
     stream = io.StringIO()
     console = Console(file=stream, force_terminal=True, color_system=None, width=160)
 
@@ -291,10 +291,10 @@ def test_apply_progress_uses_one_docker_style_row_per_package():
     rendered = stream.getvalue()
     assert "[index-exact]" in rendered
     assert "numpy==2.0.2" in rendered
-    assert "[■■■■■     ]" in rendered
-    assert "░" not in rendered
     progress_line = next(line for line in rendered.splitlines() if "8.0 MiB" in line)
-    assert "]" in progress_line
+    assert "[" in progress_line and "]" in progress_line
+    assert "━" in progress_line
+    assert "░" not in rendered
     assert "8.0 MiB / 16.0 MiB" in rendered
     assert "downloading" in rendered
 

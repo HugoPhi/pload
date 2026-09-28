@@ -520,6 +520,15 @@ def test_plan_reuses_package_from_compatible_pload_environment(tmp_path, monkeyp
     assert copy_events
     _, _, received, total = copy_events[-1].split("\t")
     assert int(received) == int(total) > 0
+    completed = next(
+        index for index, event in enumerate(progress)
+        if event.startswith("PACKAGE_DONE\tpload-demo==1.0\t")
+    )
+    creates_environment = next(
+        index for index, event in enumerate(progress)
+        if event.startswith("STAGE creating environment")
+    )
+    assert completed < creates_environment
 
 
 def test_plan_resolves_metadata_once_without_downloading_wheels(tmp_path, monkeypatch):

@@ -1815,7 +1815,23 @@ class DeclarativeEnvironmentManager:
                                 f"SOURCE\t{label}\tcopying installed package from "
                                 f"{selected['location']}"
                             )
-                        environment_copies.append(package_plan)
+                        staged_distribution = stage / f"environment-{index_number}"
+                        try:
+                            self._stage_distribution(
+                                package_plan, staged_distribution, stage,
+                                progress=progress,
+                            )
+                        except (OSError, PloadError) as exc:
+                            raise PloadError(
+                                f"planned route failed for {label} "
+                                f"(environment-copy): {exc}; "
+                                "run pload plan to choose another route"
+                            ) from exc
+                        environment_copies.append(
+                            (package_plan, staged_distribution)
+                        )
+                        if progress:
+                            progress(f"PACKAGE_DONE\t{label}\tcopied")
                     else:
                         source = data.get("sources", {}).get(selected["location"], {})
                         if progress:
@@ -1838,15 +1854,10 @@ class DeclarativeEnvironmentManager:
                         progress("STAGE installing verified wheel artifacts")
                     execute(pip + ["install", "--no-index", "--no-deps"] + artifacts,
                             capture=False)
-                for package_plan in environment_copies:
-                    self._copy_distribution(
-                        package_plan, env, stage, progress=progress,
+                for package_plan, staged_distribution in environment_copies:
+                    self._install_staged_distribution(
+                        staged_distribution, env,
                     )
-                    if progress:
-                        progress(
-                            f"PACKAGE_DONE\t{package_plan['name']}=="
-                            f"{package_plan['version']}\tcopied"
-                        )
                 for package_plan in compatible:
                     source_name = package_plan["selected"]["location"]
                     source = data.get("sources", {}).get(source_name, {})
@@ -2013,7 +2024,9 @@ class DeclarativeEnvironmentManager:
                     and data["policy"].get("reproducibility") != "compatible"):
                 raise PloadError("index-resolve is forbidden by exact reproducibility policy")
 
-    def _copy_distribution(self, package, target_environment, stage, progress=None):
+    def _stage_distribution(
+        self, package, staged_distribution, stage, progress=None,
+    ):
         selected = package["selected"]
         source_environment = Path(selected["location"])
         source_python = source_environment / (
@@ -2049,24 +2062,18 @@ with open(output, 'w', encoding='utf-8') as stream:
             str(source_python), "-c", script, package["name"], package["version"],
             selected["fingerprint"], str(file_manifest),
         ])
-        target_python = Path(target_environment) / (
-            "Scripts/python.exe" if os.name == "nt" else "bin/python"
-        )
-        site_packages = Path(execute([
-            str(target_python), "-c",
-            "import sysconfig; print(sysconfig.get_path('purelib'))",
-        ]))
         try:
             files = json.loads(file_manifest.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             raise PloadError("cannot read environment package file list") from exc
         checked = []
         total = 0
-        site_root = site_packages.resolve()
+        staged_root = Path(staged_distribution).resolve()
+        staged_root.mkdir(parents=True)
         for source_value, relative in files:
             source = Path(source_value)
-            destination = (site_root / relative).resolve()
-            if site_root not in destination.parents or not source.is_file():
+            destination = (staged_root / relative).resolve()
+            if staged_root not in destination.parents or not source.is_file():
                 raise PloadError("environment package contains an unsafe path")
             size = source.stat().st_size
             total += size
@@ -2089,6 +2096,29 @@ with open(output, 'w', encoding='utf-8') as stream:
                         _report_transfer(progress, label, received, total)
                         last_reported_at = now
         _report_transfer(progress, label, received, total)
+
+    @staticmethod
+    def _install_staged_distribution(staged_distribution, target_environment):
+        target_python = Path(target_environment) / (
+            "Scripts/python.exe" if os.name == "nt" else "bin/python"
+        )
+        site_packages = Path(execute([
+            str(target_python), "-c",
+            "import sysconfig; print(sysconfig.get_path('purelib'))",
+        ])).resolve()
+        for source in Path(staged_distribution).rglob("*"):
+            if not source.is_file():
+                continue
+            relative = source.relative_to(staged_distribution)
+            destination = (site_packages / relative).resolve()
+            if site_packages not in destination.parents:
+                raise PloadError("staged environment package contains an unsafe path")
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                source.replace(destination)
+            except OSError:
+                shutil.copy2(source, destination)
+                source.unlink()
 
     def _acquire(
         self, path, data, package, selected, destination, stage, interpreter,

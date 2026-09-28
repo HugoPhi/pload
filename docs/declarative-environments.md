@@ -290,8 +290,10 @@ updates into stable plain-text rows without terminal control characters. Cache
 routes report bytes as their SHA-256 content is actually read; configuration
 artifacts and external caches report bytes while copying and hashing.
 Environment-copy routes first validate the planned version and `RECORD`
-fingerprint, then copy the validated file list with a real total and processed
-byte count. This makes the saved decision and
+fingerprint, then immediately stage the validated file list with a real total
+and processed byte count. The row finishes before pload advances to the next
+package; staged files move into site-packages after the target environment is
+created. This makes the saved decision and
 its execution visible in one command without allowing apply to recalculate the
 plan.
 

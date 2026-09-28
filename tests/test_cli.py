@@ -291,7 +291,7 @@ def test_apply_progress_uses_one_docker_style_row_per_package():
     rendered = stream.getvalue()
     assert "[index-exact]" in rendered
     assert "numpy==2.0.2" in rendered
-    assert "[█ █ █ █ █" in rendered
+    assert "[■■■■■     ]" in rendered
     assert "░" not in rendered
     progress_line = next(line for line in rendered.splitlines() if "8.0 MiB" in line)
     assert "]" in progress_line

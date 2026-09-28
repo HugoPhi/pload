@@ -59,8 +59,8 @@ Pre-release: `1.2.0a1`
   downloading implicitly.
 - Add `pload apply --local` / `-l` to reproduce a saved plan into `.venv`
   beside its configuration file, matching `pload init` project layout.
-- Render apply transfers as bounded, spaced solid-block progress bars with
-  blank unfinished cells and the selected acquisition method in brackets.
+- Render apply transfers as bounded square-cell progress bars with subtle glyph
+  separation, blank unfinished cells and the acquisition method in brackets.
 
 ### Removed
 

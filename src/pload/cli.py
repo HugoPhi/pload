@@ -548,20 +548,20 @@ def _progress_size(value):
 
 
 class DockerBarColumn(ProgressColumn):
-    """Fixed-width, spaced block bar with visible start and end boundaries."""
+    """Fixed-width square bar with visible start and end boundaries."""
 
     def __init__(self, width=10):
-        super().__init__(table_column=Column(width=width * 2 + 1, no_wrap=True))
+        super().__init__(table_column=Column(width=width + 2, no_wrap=True))
         self.width = width
 
     def render(self, task):
         ratio = 0 if not task.total else min(max(task.completed / task.total, 0), 1)
         complete = int(ratio * self.width)
         bar = Text("[", style="dim")
-        for cell in range(self.width):
-            if cell:
-                bar.append(" ")
-            bar.append("█" if cell < complete else " ", style="green")
+        # U+25A0 has a small amount of built-in side bearing, so adjacent
+        # completed cells remain distinct without inserting full terminal cells.
+        bar.append("■" * complete, style="green")
+        bar.append(" " * (self.width - complete))
         bar.append("]", style="dim")
         return bar
 

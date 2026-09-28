@@ -104,7 +104,8 @@ chooser; strict per-package exceptions live under `[plan.packages.NAME]`.
 `apply` prints the saved plan first, then compact Docker-style progress rows.
 Each package is prefixed by its route, such as `[cache]`, `[index-exact]`, or
 `[repository]`, alongside its source and real download byte progress. The bar
-uses bounded, spaced solid blocks; unfinished cells remain blank.
+uses bounded square cells with subtle visual separation; unfinished cells remain
+blank.
 
 Use `pload apply --local` (or `-l`) for a project-local environment. It creates
 `.venv` beside the selected `pload.toml`, matching the layout produced by

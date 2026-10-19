@@ -884,10 +884,16 @@ def render_landing():
 
 
 def shell_script(shell):
+    from pload.completion import shell_completion
+
+    return _activation_script(shell) + "\n" + shell_completion(shell)
+
+
+def _activation_script(shell):
     if shell in {"bash", "zsh"}:
         return r'''pload() {
     case "${1:-}" in
-        ""|new|init|i|rm|remove|del|delete|list|ls|path|p|shell-init|shell|python|py|config|cfg|describe|lock|plan|apply|repo|-*)
+        ""|new|init|i|rm|remove|del|delete|list|ls|path|p|shell-init|shell|python|py|config|cfg|describe|lock|plan|apply|repo|remote|-*)
             command pload "$@"
             ;;
         *)
@@ -900,7 +906,7 @@ def shell_script(shell):
     if shell == "fish":
         return r'''function pload
     switch "$argv[1]"
-        case '' new init i rm remove del delete list ls path p shell-init shell python py config cfg describe lock plan apply repo '-*'
+        case '' new init i rm remove del delete list ls path p shell-init shell python py config cfg describe lock plan apply repo remote '-*'
             command pload $argv
         case '*'
             set -l name .
@@ -914,8 +920,8 @@ def shell_script(shell):
 end'''
     return r'''function pload {
     param([Parameter(ValueFromRemainingArguments = $true)][string[]]$PloadArgs)
-    $commands = @('new', 'init', 'i', 'rm', 'remove', 'del', 'delete', 'list', 'ls', 'path', 'p', 'shell-init', 'shell', 'python', 'py', 'config', 'cfg', 'describe', 'lock', 'plan', 'apply', 'repo', '-h', '--help', '--version')
-    $backend = Get-Command -Name @('pload.exe', 'pload.cmd') -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    $commands = @('new', 'init', 'i', 'rm', 'remove', 'del', 'delete', 'list', 'ls', 'path', 'p', 'shell-init', 'shell', 'python', 'py', 'config', 'cfg', 'describe', 'lock', 'plan', 'apply', 'repo', 'remote', '-h', '--help', '--version')
+    $backend = Get-Command -Name pload -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $backend) { throw 'pload executable not found on PATH' }
     if ($PloadArgs.Count -eq 0) {
         & $backend.Source
@@ -992,6 +998,13 @@ def _guided_new(config):
 
 def run(argv=None):
     raw_args = list(sys.argv[1:] if argv is None else argv)
+    if raw_args and raw_args[0] == "__complete":
+        from pload.completion import emit
+
+        try:
+            return emit(build_parser(), raw_args[1:])
+        except PloadError:
+            return 0
     if not raw_args:
         render_landing()
         return 0

@@ -213,7 +213,7 @@ environment. Shell integration uses the `--shell` form internally, then sources
 the returned activation script in the current shell.
 """,
     ("shell-init",): r"""
-# Enable activation in the current shell
+# Enable activation and Tab completion in the current shell
 
 ```bash
 eval "$(pload shell-init bash)"
@@ -228,6 +228,13 @@ After this, `pload v1`, `pload data`, and `pload .` can change the current
 shell's active environment. Printing the integration code has no side effect by
 itself; a profile changes only when the installer is explicitly asked to update
 one or when you add the command manually.
+
+Press Tab after `pload v` to complete environment IDs, after `pload new -v py`
+to complete Python IDs, or after `pload py` to complete Python subcommands.
+Options, their fixed choices, repository names, directories, and TOML files
+are completed in the appropriate context. New environments appear immediately.
+Run `pload py ls` to refresh Python ID and alias suggestions. Completion reads
+local state only; it never runs package downloads or SSH searches.
 """,
     ("python",): r"""
 # Find or install Python runtimes

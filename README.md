@@ -274,6 +274,33 @@ Invoke-Expression (& pload shell-init powershell | Out-String)
 Then `pload v1`, `pload data`, and `pload .` can activate environments in the
 current shell.
 
+The same shell integration enables Tab completion for Bash, Zsh, Fish, and
+PowerShell. After upgrading, evaluate the matching command above once to refresh
+both activation and completion in the current terminal.
+
+| Type, then press Tab | Suggested values |
+| --- | --- |
+| `pload v` | Existing environment IDs, such as `v1` and `v3` |
+| `pload data` | Matching environment names |
+| `pload py ` | `install`, `list` / `ls`, `path` / `p` |
+| `pload new -v py` | Python IDs, such as `py1` and `py2` |
+| `pload new -v uv-` | Installed Python aliases, such as `uv-v3.12.8` |
+| `pload py path ` | Python IDs, aliases, and installed versions |
+| `pload new --` | Creation options, including `--name` and `--message` |
+| `pload py ls -f uv,c` | Comma-separated source types, such as `uv,conda` |
+| `pload rm ` or `pload describe ` | Existing environment IDs and names |
+| `pload cfg set ` | Setting names, followed by supported setting values |
+| `pload remote add numpy --remote ` | Configured repository names |
+| `pload apply ` or `pload init -P ` | TOML files or directories, respectively |
+
+Environment candidates update on each Tab, so creating or removing an environment
+does not require restarting the shell. Python ID and alias candidates use the
+local interpreter registry; run `pload py ls` to discover or refresh interpreters
+first. Completion only reads local files: it does not download packages, probe
+interpreters, contact SSH repositories, or add environments to the registry.
+Package-name suggestions come from local cached wheels and, for remote backup,
+the selected environment's installed metadata; they are not a full PyPI search.
+
 ## Discover and install Python
 
 `pload python list` scans usable interpreters from the operating system, PATH,

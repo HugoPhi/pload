@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Enable context-aware Tab completion alongside shell activation for Bash, Zsh,
+  Fish, and PowerShell. Complete commands and aliases, options and fixed values,
+  environment IDs/names, Python IDs/aliases, source filters, repositories, local
+  package names, directories, and TOML paths using read-only local resources.
+- Fix shell dispatch for the `remote` command, so it is not treated as an
+  environment name by the shell activation wrapper.
 - Explain missing shell integration when an environment name or ID reaches the
   executable, including a command to enable activation without restarting.
 - Print commands to enable activation in the current terminal after installation,

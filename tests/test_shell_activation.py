@@ -27,12 +27,17 @@ def test_create_and_switch_environments_without_restarting_shell(tmp_path, shell
     env["PLOAD_STATE_DIR"] = str(home / "state")
     env["NO_COLOR"] = "1"
     env["PLOAD_NO_PROGRESS"] = "1"
+    env["SHELL"] = executable
     env.pop("VIRTUAL_ENV", None)
     script = r'''
 set -eu
-eval "$(command pload shell-init "$1")"
-# Initialize before any environment exists; never reload the function below.
+# Reproduce a just-installed terminal: the launcher works but no function exists.
 pload new -n first
+if pload first 2>missing-name.txt; then exit 1; fi
+if pload v1 2>missing-id.txt; then exit 1; fi
+test -z "${VIRTUAL_ENV-}"
+# Initialize in place, without restarting the shell.
+eval "$(command pload shell-init "$1")"
 pload first
 test "$VIRTUAL_ENV" = "$PLOAD_VENVS_DIR/first"
 python -c 'import os, sys; assert sys.prefix == os.environ["VIRTUAL_ENV"]'
@@ -56,3 +61,7 @@ python -c 'import os, sys; assert sys.prefix == os.environ["VIRTUAL_ENV"]'
         cwd=tmp_path, env=env, capture_output=True, text=True, timeout=120, check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+    for filename in ("missing-name.txt", "missing-id.txt"):
+        error = (tmp_path / filename).read_text(encoding="utf-8")
+        assert "shell activation is not initialized in this terminal" in error
+        assert f'eval "$(command pload shell-init {shell})"' in error

@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -997,6 +998,29 @@ def run(argv=None):
     if any(item in HELP_FLAGS for item in raw_args):
         render_help(raw_args)
         return 0
+    if (len(raw_args) == 1 and raw_args[0] not in COMMAND_NAMES
+            and not raw_args[0].startswith("-")):
+        # Activation runs inside the caller's shell function. Reaching the
+        # executable with an environment selector means that function is absent
+        # (or was bypassed); argparse's "invalid choice" hides the real problem.
+        try:
+            VenvManager(ConfigManager()).resolve_existing(raw_args[0])
+        except PloadError:
+            pass
+        else:
+            shell = Path(os.environ.get("SHELL", "")).name
+            if os.name == "nt":
+                setup = "Invoke-Expression (& pload shell-init powershell | Out-String)"
+            elif shell == "fish":
+                setup = "command pload shell-init fish | source"
+            else:
+                shell = shell if shell in {"bash", "zsh"} else "bash"
+                setup = f'eval "$(command pload shell-init {shell})"'
+            raise PloadError(
+                "shell activation is not initialized in this terminal. "
+                "Run the following command in this terminal, then retry activation:\n"
+                + setup
+            )
     args = build_parser().parse_args(raw_args)
     command = COMMAND_NAMES.get(args.command, args.command)
     config = ConfigManager(args.home, args.venvs_dir, args.state_dir)

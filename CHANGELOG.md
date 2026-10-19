@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Explain missing shell integration when an environment name or ID reaches the
+  executable, including a command to enable activation without restarting.
 - Print commands to enable activation in the current terminal after installation,
   rather than requiring users to discover that their updated shell profile must
   be loaded first.

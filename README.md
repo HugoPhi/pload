@@ -278,6 +278,11 @@ The same shell integration enables Tab completion for Bash, Zsh, Fish, and
 PowerShell. After upgrading, evaluate the matching command above once to refresh
 both activation and completion in the current terminal.
 
+In Zsh, the first Tab shows labeled groups such as Commands, Environments,
+Python, and Options, with a short explanation beside each choice. Press Tab
+again to enter the selection menu; use the arrow keys and Enter to choose.
+This uses Zsh's built-in completion menu and requires no separate tool.
+
 | Type, then press Tab | Suggested values |
 | --- | --- |
 | `pload v` | Existing environment IDs, such as `v1` and `v3` |

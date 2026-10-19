@@ -62,12 +62,18 @@ def _environments(config):
         path = Path(item.get("path", "")).expanduser()
         if not item.get("path") or path.is_symlink() or not (path / "pyvenv.cfg").is_file():
             continue
-        description = item.get("description") or item.get("name") or str(path)
-        result.extend((item[key], str(description)) for key in ("id", "name") if item.get(key))
+        name, identifier = str(item.get("name") or path.name), str(item.get("id") or "")
+        description = str(item.get("description") or "")
+        for key, label in (("id", name), ("name", identifier)):
+            if item.get(key):
+                details = " · ".join(part for part in (label, description) if part)
+                result.append((str(item[key]), details))
     if config.venv_path.is_dir():
+        known = {value for value, _ in result}
         for path in config.venv_path.iterdir():
-            if not path.is_symlink() and (path / "pyvenv.cfg").is_file():
-                result.append((path.name, "environment"))
+            if (path.name not in known and not path.is_symlink()
+                    and (path / "pyvenv.cfg").is_file()):
+                result.append((path.name, "local environment"))
     return result
 
 
@@ -76,9 +82,12 @@ def _pythons(config, install=False):
     for item in _records(config.state_path / "python-runtimes.json", "runtimes"):
         if not item.get("path") or not Path(item["path"]).is_file():
             continue
-        description = f"{item.get('source', 'Python')} {item.get('version', '')}"
+        description = f"{item.get('source', 'Python')} · {item.get('version', '')}"
         keys = ("version",) if install else ("id", "alias", "version")
-        result.extend((item[key], description) for key in keys if item.get(key))
+        for key in keys:
+            if item.get(key):
+                label = f"{item['id']} · {description}" if key == "alias" and item.get("id") else description
+                result.append((item[key], label))
         version = str(item.get("version", ""))
         if version.count(".") >= 2:
             result.append((".".join(version.split(".")[:2]), "Python minor version"))
@@ -167,8 +176,28 @@ def _values(action, prefix, values, config):
     return []
 
 
-def candidates(parser, words, index):
-    """Return (value, description) pairs at a zero-based shell word index."""
+def _group_for_value(action, description):
+    if description in {"directory", "file", "configuration file"}:
+        return "Paths"
+    if description == "artifact repository":
+        return "Repositories"
+    if action.dest in {"python_version", "version"}:
+        return "Python"
+    if action.dest in {"names", "envs", "environment", "source", "name"}:
+        return "Environments"
+    if action.dest in {"requirements", "package"}:
+        return "Packages"
+    if action.dest == "sources":
+        return "Sources"
+    if action.dest in {"repository", "location"}:
+        return "Repositories"
+    if action.dest in DIRECTORY_DESTS | {"file", "output"}:
+        return "Paths"
+    return "Values"
+
+
+def candidates(parser, words, index, with_groups=False):
+    """Return suggestions at a zero-based shell word index, optionally with groups."""
     if index < 1 or index > len(words):
         return []
     prefix = words[index] if index < len(words) else ""
@@ -228,38 +257,44 @@ def candidates(parser, words, index):
             pending, attached, prefix = option, name + "=", value
 
     if pending is not None and (not prefix.startswith("-") or attached):
-        result = _values(pending, prefix, values, config)
+        result = [(value, description, _group_for_value(pending, description))
+                  for value, description in _values(pending, prefix, values, config)]
     elif prefix.startswith("-") and not options_done:
-        result = [(flag, action.help or "")
+        result = [(flag, action.help or "", "Options")
                   for flag, action in parser._option_string_actions.items()]
         if "-h" in words[:index] or "--help" in words[:index]:
-            result += [("-d", "detailed help with examples"),
-                       ("--detailed", "detailed help with examples")]
+            result += [("-d", "detailed help with examples", "Options"),
+                       ("--detailed", "detailed help with examples", "Options")]
     else:
         positional = [action for action in parser._actions if not action.option_strings]
         action = positional[position] if position < len(positional) else None
         if isinstance(action, argparse._SubParsersAction):
-            result = [(name, subparser.description or name)
+            result = [(name, subparser.description or name, "Commands")
                       for name, subparser in action.choices.items()]
             if action.dest == "command" and index == 1:
-                result += _environments(config)
+                result += [(value, description, "Environments")
+                           for value, description in _environments(config)]
                 if "/" in prefix or "\\" in prefix or prefix.startswith("~"):
-                    result += _paths(prefix, directories=True)
+                    result += [(value, description, "Paths")
+                               for value, description in _paths(prefix, directories=True)]
         elif action:
-            result = _values(action, prefix, values, config)
+            result = [(value, description, _group_for_value(action, description))
+                      for value, description in _values(action, prefix, values, config)]
         else:
             result = []
         if not prefix and not options_done:
-            result += [(flag, action.help or "")
+            result += [(flag, action.help or "", "Options")
                        for flag, action in parser._option_string_actions.items()]
     unique = {}
-    for value, description in result:
+    for value, description, group in result:
         if not isinstance(value, str) or not value.startswith(prefix):
             continue
         if any(ord(char) < 32 or ord(char) == 127 for char in value):
             continue
-        unique[attached + value] = " ".join(str(description).split())[:180]
-    return list(unique.items())
+        unique[attached + value] = (" ".join(str(description).split())[:180], group)
+    if with_groups:
+        return [(value, description, group) for value, (description, group) in unique.items()]
+    return [(value, description) for value, (description, _) in unique.items()]
 
 
 def emit(parser, argv):
@@ -268,10 +303,13 @@ def emit(parser, argv):
         unquote = bool(argv and argv[0] == "--unquote")
         if unquote:
             argv = argv[1:]
+        grouped = bool(argv and argv[0] == "--groups")
+        if grouped:
+            argv = argv[1:]
         index = int(argv[0])
         words = [_unquote(word) for word in argv[1:]] if unquote else argv[1:]
-        for value, description in candidates(parser, words, index):
-            print(value + "\t" + description)
+        for row in candidates(parser, words, index, with_groups=grouped):
+            print("\t".join(row))
     except (OSError, ValueError, TypeError, IndexError):
         return 0
     return 0
@@ -327,24 +365,48 @@ complete -o filenames -F _pload_complete pload
     if shell == "zsh":
         return r'''
 _pload_complete() {
-    local value description
-    local -a candidates descriptions directories
-    while IFS=$'\t' read -r value description; do
-        if [[ "$value" == */ ]]; then
-            directories+=("$value")
-        else
-            candidates+=("$value")
-            descriptions+=("$value -- $description")
-        fi
-    done < <(command pload __complete --unquote "$((CURRENT - 1))" "${words[@]}" 2>/dev/null)
-    (( ${#directories} )) && compadd -S '' -- "${directories[@]}"
-    (( ${#candidates} )) && compadd -d descriptions -- "${candidates[@]}"
+    local value description group i
+    local -a values descriptions groups order matches display expl
+    while IFS=$'\t' read -r value description group; do
+        [[ -z "$value" ]] && continue
+        values+=("$value")
+        descriptions+=("$description")
+        groups+=("$group")
+        (( ${order[(Ie)$group]} )) || order+=("$group")
+    done < <(command pload __complete --unquote --groups "$((CURRENT - 1))" "${words[@]}" 2>/dev/null)
+    for group in "${order[@]}"; do
+        _description -V "${(L)group}" expl "$group"
+        matches=()
+        display=()
+        for ((i=1; i<=${#values}; i++)); do
+            [[ "${groups[i]}" == "$group" && "${values[i]}" != */ ]] || continue
+            matches+=("${values[i]}")
+            display+=("${values[i]}  ·  ${descriptions[i]}")
+        done
+        (( ${#matches} )) && compadd "${expl[@]}" -l -d display -- "${matches[@]}"
+        matches=()
+        display=()
+        for ((i=1; i<=${#values}; i++)); do
+            [[ "${groups[i]}" == "$group" && "${values[i]}" == */ ]] || continue
+            matches+=("${values[i]}")
+            display+=("${values[i]}  ·  ${descriptions[i]}")
+        done
+        (( ${#matches} )) && compadd "${expl[@]}" -S '' -l -d display -- "${matches[@]}"
+    done
     return 0
 }
 if ! (( $+functions[compdef] )); then
     autoload -Uz compinit
     compinit -i
 fi
+zmodload zsh/complist 2>/dev/null
+zstyle ':completion:*:*:pload:*' menu select=2
+if [[ -n "$NO_COLOR" ]]; then
+    zstyle ':completion:*:*:pload:*' format '› %d'
+else
+    zstyle ':completion:*:*:pload:*' format '%F{cyan}› %d%f'
+fi
+zstyle ':completion:*:*:pload:*' group-name ''
 compdef _pload_complete pload
 '''
     if shell == "fish":

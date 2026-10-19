@@ -155,6 +155,16 @@ def test_completion_protocol_never_prints_help(completion_home, capsys):
     assert capsys.readouterr().out == ""
 
 
+def test_grouped_completion_keeps_inserted_values_separate_from_labels(completion_home, capsys):
+    assert complete("data")["data-tools"] == "v3 · Data analysis"
+    assert main(["__complete", "--groups", "1", "pload", "v"]) == 0
+    assert "v3\tdata-tools · Data analysis\tEnvironments\n" in capsys.readouterr().out
+    assert main(["__complete", "--groups", "3", "pload", "new", "-v", "py"]) == 0
+    assert "py2\tuv · 3.12.8\tPython\n" in capsys.readouterr().out
+    assert main(["__complete", "--groups", "2", "pload", "new", "--n"]) == 0
+    assert "--name\texact environment name\tOptions\n" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("prefix", ["my\\ project/ch", "'my project/ch", '"my project/ch'])
 def test_shell_quoted_paths_are_parsed_without_evaluation(
     completion_home, tmp_path, monkeypatch, capsys, prefix,
@@ -212,6 +222,7 @@ set -e
 eval "$(command pload shell-init zsh)"
 test "${_comps[pload]}" = _pload_complete
 # Capture arguments passed to zsh's native completion engine.
+_description() { expl=(-V "$2" -X "$4"); }
 compadd() { print -rl -- "$@"; }
 words=(pload new -v py)
 CURRENT=4

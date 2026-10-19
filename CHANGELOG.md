@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.2.0 - 2026-10-19
+
+Stable release of the declarative environment workflow and live shell completion.
+
+- Enable context-aware Tab completion alongside shell activation for Bash, Zsh,
+  Fish, and PowerShell. Complete commands and aliases, options and fixed values,
+  environment IDs/names, Python IDs/aliases, source filters, repositories, local
+  package names, directories, and TOML paths using read-only local resources.
+- Keep Zsh completion compact: show matching values without repeated group
+  headings or descriptions, and suggest options only after `-` is typed.
+- Fix shell dispatch for the `remote` command, so it is not treated as an
+  environment name by the shell activation wrapper.
+- Explain missing shell integration when an environment name or ID reaches the
+  executable, including a command to enable activation without restarting.
+- Print commands to enable activation in the current terminal after installation,
+  rather than requiring users to discover that their updated shell profile must
+  be loaded first.
+- Exercise create, activate, create-while-active, ID switching, and project-local
+  activation in persistent bash and zsh subprocesses using the real launcher.
+
 ## 1.2.0b1 - 2026-09-28
 
 Feature-complete beta for the declarative environment workflow.

@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -883,10 +884,16 @@ def render_landing():
 
 
 def shell_script(shell):
+    from pload.completion import shell_completion
+
+    return _activation_script(shell) + "\n" + shell_completion(shell)
+
+
+def _activation_script(shell):
     if shell in {"bash", "zsh"}:
         return r'''pload() {
     case "${1:-}" in
-        ""|new|init|i|rm|remove|del|delete|list|ls|path|p|shell-init|shell|python|py|config|cfg|describe|lock|plan|apply|repo|-*)
+        ""|new|init|i|rm|remove|del|delete|list|ls|path|p|shell-init|shell|python|py|config|cfg|describe|lock|plan|apply|repo|remote|-*)
             command pload "$@"
             ;;
         *)
@@ -899,7 +906,7 @@ def shell_script(shell):
     if shell == "fish":
         return r'''function pload
     switch "$argv[1]"
-        case '' new init i rm remove del delete list ls path p shell-init shell python py config cfg describe lock plan apply repo '-*'
+        case '' new init i rm remove del delete list ls path p shell-init shell python py config cfg describe lock plan apply repo remote '-*'
             command pload $argv
         case '*'
             set -l name .
@@ -913,8 +920,8 @@ def shell_script(shell):
 end'''
     return r'''function pload {
     param([Parameter(ValueFromRemainingArguments = $true)][string[]]$PloadArgs)
-    $commands = @('new', 'init', 'i', 'rm', 'remove', 'del', 'delete', 'list', 'ls', 'path', 'p', 'shell-init', 'shell', 'python', 'py', 'config', 'cfg', 'describe', 'lock', 'plan', 'apply', 'repo', '-h', '--help', '--version')
-    $backend = Get-Command -Name @('pload.exe', 'pload.cmd') -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    $commands = @('new', 'init', 'i', 'rm', 'remove', 'del', 'delete', 'list', 'ls', 'path', 'p', 'shell-init', 'shell', 'python', 'py', 'config', 'cfg', 'describe', 'lock', 'plan', 'apply', 'repo', 'remote', '-h', '--help', '--version')
+    $backend = Get-Command -Name pload -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $backend) { throw 'pload executable not found on PATH' }
     if ($PloadArgs.Count -eq 0) {
         & $backend.Source
@@ -991,12 +998,42 @@ def _guided_new(config):
 
 def run(argv=None):
     raw_args = list(sys.argv[1:] if argv is None else argv)
+    if raw_args and raw_args[0] == "__complete":
+        from pload.completion import emit
+
+        try:
+            return emit(build_parser(), raw_args[1:])
+        except PloadError:
+            return 0
     if not raw_args:
         render_landing()
         return 0
     if any(item in HELP_FLAGS for item in raw_args):
         render_help(raw_args)
         return 0
+    if (len(raw_args) == 1 and raw_args[0] not in COMMAND_NAMES
+            and not raw_args[0].startswith("-")):
+        # Activation runs inside the caller's shell function. Reaching the
+        # executable with an environment selector means that function is absent
+        # (or was bypassed); argparse's "invalid choice" hides the real problem.
+        try:
+            VenvManager(ConfigManager()).resolve_existing(raw_args[0])
+        except PloadError:
+            pass
+        else:
+            shell = Path(os.environ.get("SHELL", "")).name
+            if os.name == "nt":
+                setup = "Invoke-Expression (& pload shell-init powershell | Out-String)"
+            elif shell == "fish":
+                setup = "command pload shell-init fish | source"
+            else:
+                shell = shell if shell in {"bash", "zsh"} else "bash"
+                setup = f'eval "$(command pload shell-init {shell})"'
+            raise PloadError(
+                "shell activation is not initialized in this terminal. "
+                "Run the following command in this terminal, then retry activation:\n"
+                + setup
+            )
     args = build_parser().parse_args(raw_args)
     command = COMMAND_NAMES.get(args.command, args.command)
     config = ConfigManager(args.home, args.venvs_dir, args.state_dir)

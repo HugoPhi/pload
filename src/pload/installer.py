@@ -626,6 +626,32 @@ def print_welcome_screen(version, launcher, settings, profile=None):
     ui.logo(output=output)
     output.print()
     ui.success(f"pload {version} is ready", detail="Private runtime and launcher installed")
+    if profile:
+        ui.heading("Enable activation in this terminal", output=output)
+        output.print(
+            "  The shell profile was updated. Run these commands once in this terminal "
+            "to activate environments immediately:"
+        )
+        shell = settings["shell"]
+        bin_dir = settings["bin_dir"]
+        if shell == "fish":
+            commands = [
+                f"set -gx PATH {shlex.quote(bin_dir)} $PATH",
+                "command pload shell-init fish | source",
+            ]
+        elif shell == "powershell":
+            quoted_bin = bin_dir.replace("'", "''")
+            commands = [
+                f"$env:Path = '{quoted_bin};' + $env:Path",
+                "Invoke-Expression (& pload shell-init powershell | Out-String)",
+            ]
+        else:
+            commands = [
+                f'export PATH={shlex.quote(bin_dir)}:"$PATH"',
+                f'eval "$(command pload shell-init {shell})"',
+            ]
+        for command in commands:
+            output.print("  " + command, markup=False, highlight=False, soft_wrap=True)
     ui.heading("Next steps", output=output)
     output.print("  [cyan]1[/]  Check configuration   [bold]pload cfg[/]")
     output.print("  [cyan]2[/]  Find Python versions   [bold]pload python list[/]")

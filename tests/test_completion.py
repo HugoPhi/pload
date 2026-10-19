@@ -1,3 +1,4 @@
+import argparse
 import json
 import os
 import shutil
@@ -77,6 +78,18 @@ def test_new_names_and_descriptions_are_free_text(completion_home):
     assert complete("new", "--name", "") == {}
     assert complete("new", "-m", "") == {}
     assert "py2" not in complete("py", "install", "")
+
+
+def test_every_command_and_alias_exposes_all_of_its_options(completion_home):
+    def visit(parser, words):
+        offered = complete(*words, "-")
+        assert set(parser._option_string_actions) <= offered.keys(), words
+        for action in parser._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                for name, child in action.choices.items():
+                    visit(child, [*words, name])
+
+    visit(build_parser(), [])
 
 
 def test_completion_uses_overridden_roots_and_is_read_only(completion_home, tmp_path, monkeypatch):
@@ -220,7 +233,8 @@ complete -C 'pload v'
     else:
         script = """
 $ErrorActionPreference = 'Stop'
-Invoke-Expression ((& (Get-Command pload -CommandType Application).Source shell-init powershell) -join "`n")
+$backend = Get-Command pload -CommandType Application | Select-Object -First 1
+Invoke-Expression ((& $backend.Source shell-init powershell) -join "`n")
 $line = 'pload new -v py'
 (TabExpansion2 -inputScript $line -cursorColumn $line.Length).CompletionMatches | ForEach-Object { $_.ListItemText }
 $line = 'pload v'

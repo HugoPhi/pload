@@ -325,7 +325,7 @@ _pload_complete() {
 }
 if ! (( $+functions[compdef] )); then
     autoload -Uz compinit
-    compinit
+    compinit -i
 fi
 compdef _pload_complete pload
 '''

@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 1.2.0 - 2026-10-19
+
+Stable release of the declarative environment workflow and live shell completion.
 
 - Enable context-aware Tab completion alongside shell activation for Bash, Zsh,
   Fish, and PowerShell. Complete commands and aliases, options and fixed values,

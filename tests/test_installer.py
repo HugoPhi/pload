@@ -242,7 +242,7 @@ def test_post_install_welcome_screen_contains_ascii_and_next_steps(capsys, tmp_p
 def test_post_install_explains_current_terminal_activation(capsys, tmp_path):
     settings = collect_settings(installer_args(tmp_path, shell="zsh"))
     installer.print_welcome_screen(
-        "1.2.0b1", Path(settings["bin_dir"]) / "pload", settings,
+        "1.2.0", Path(settings["bin_dir"]) / "pload", settings,
         profile=tmp_path / ".zshrc",
     )
 

@@ -1,6 +1,6 @@
 # pload
 
-![pload welcome screen on macOS](docs/images/pload-welcome-macos.png)
+![pload welcome screen on macOS](https://raw.githubusercontent.com/HugoPhi/pload/main/docs/images/pload-welcome-macos.png)
 
 `pload` is a relocatable Python runtime and virtual-environment manager for
 Bash, Zsh, Fish, and PowerShell. Its private runtime, downloaded Python
@@ -80,7 +80,7 @@ profile when `--shell` is supplied or already configured.
 
 ## Reproduce and share environments
 
-The `1.2` preview uses one clean, user-authored `pload.toml` as portable intent.
+The declarative workflow uses one clean, user-authored `pload.toml` as portable intent.
 pload manages `.pload_lock.toml` (exact versions and artifacts) and
 `.pload_plan.toml` (the selected acquisition route for every package):
 
@@ -145,33 +145,31 @@ in place. Your configured directories, registry, downloaded Python runtimes,
 and virtual environments are kept:
 
 ```console
-pload-install --yes --package-spec "pload==1.0.0"
-```
-
-To opt into the declarative-environment pre-release for testing:
-
-```console
-pload-install --yes --package-spec "pload==1.2.0b1"
-```
-
-To always follow the newest published release instead of pinning a version,
-omit the version constraint:
-
-```console
 pload-install --yes --package-spec pload
 ```
+
+The unpinned `pload` package spec follows the newest stable release on the
+selected package index. Supplying it explicitly also replaces a version pin
+saved by an earlier installer run.
 
 If your selected mirror has not synchronized the release yet, choose the
 official index for this run (or replace it with another configured index):
 
 ```console
-pload-install --yes --package-spec "pload==1.0.0" --pip-index https://pypi.org/simple
+pload-install --yes --package-spec pload --pip-index https://pypi.org/simple
 ```
 
 For pipx installations use pipx's own upgrade command:
 
 ```console
 pipx upgrade pload
+```
+
+If you installed with `python -m pip install --user pload` on a system that
+allows user-site installs, upgrade using that same interpreter:
+
+```console
+python -m pip install --user --upgrade pload
 ```
 
 For a dedicated bootstrap virtual environment, run pip through that same
@@ -283,6 +281,8 @@ At `pload `, it suggests primary commands and available environment IDs;
 type part of an alias or environment name to find it. Options appear when you
 type `-`, such as `pload new -`. No separate completion tool is required.
 
+![Compact Zsh Tab completion on macOS](https://raw.githubusercontent.com/HugoPhi/pload/main/docs/images/pload-completion-macos.png)
+
 | Type, then press Tab | Suggested values |
 | --- | --- |
 | `pload v` | Existing environment IDs, such as `v1` and `v3` |
@@ -329,7 +329,7 @@ py2  conda-v3.11.9  3.11.9   conda   ~/miniforge3/envs/data/bin/python
 
 The ID and alias are separate columns in the real output:
 
-![Python runtime discovery on macOS](docs/images/pload-python-list-macos.png)
+![Python runtime discovery on macOS](https://raw.githubusercontent.com/HugoPhi/pload/main/docs/images/pload-python-list-macos.png)
 
 Use any of these forms when selecting an interpreter:
 
@@ -394,7 +394,7 @@ Every managed environment receives an ID such as `v1`, `v2`, or `v3`, plus a
 description and creation timestamp. Deleted IDs are reused from the first
 available number. `pload list` displays environments newest-first:
 
-![Environment list on macOS](docs/images/pload-list-macos.png)
+![Environment list on macOS](https://raw.githubusercontent.com/HugoPhi/pload/main/docs/images/pload-list-macos.png)
 
 The table includes ID, name, Python version, description, and full path. A
 spinner is shown in interactive terminals; redirected and CI output uses stable
@@ -424,7 +424,7 @@ pload-install -h
 The root help keeps global storage options together, while command-specific
 help shows only that command's arguments:
 
-![Root help on macOS](docs/images/pload-help-macos.png)
+![Root help on macOS](https://raw.githubusercontent.com/HugoPhi/pload/main/docs/images/pload-help-macos.png)
 
 Detailed help adds examples, expected output, disk effects, and failure behavior:
 

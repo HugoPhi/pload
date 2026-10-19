@@ -1,6 +1,6 @@
 # Declarative environments
 
-The `1.2` preview treats reproduction as resource scheduling, not as a sequence
+The declarative workflow treats reproduction as resource scheduling, not as a sequence
 of commands the user must design. You carry one small `pload.toml`; pload
 resolves exact versions, inventories available resources, saves an auditable
 route for every package, and executes exactly those routes.

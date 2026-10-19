@@ -6,6 +6,7 @@ registries and local directories; Tab never probes interpreters or repositories.
 
 import argparse
 import json
+import shlex
 from pathlib import Path
 
 from pload.managers.platform import ConfigManager
@@ -264,12 +265,29 @@ def candidates(parser, words, index):
 def emit(parser, argv):
     """Internal protocol: index, words (including pload); TSV suggestions only."""
     try:
+        unquote = bool(argv and argv[0] == "--unquote")
+        if unquote:
+            argv = argv[1:]
         index = int(argv[0])
-        for value, description in candidates(parser, argv[1:], index):
+        words = [_unquote(word) for word in argv[1:]] if unquote else argv[1:]
+        for value, description in candidates(parser, words, index):
             print(value + "\t" + description)
     except (OSError, ValueError, TypeError, IndexError):
         return 0
     return 0
+
+
+def _unquote(word):
+    # COMP_WORDS may contain shell quoting. Parse it as data, never with eval.
+    # A token at the cursor can have an opening quote without its closing one.
+    for ending in ("", '"', "'"):
+        try:
+            parsed = shlex.split(word + ending, comments=False)
+            if len(parsed) == 1:
+                return parsed[0]
+        except ValueError:
+            continue
+    return word
 
 
 def shell_completion(shell):
@@ -302,7 +320,7 @@ _pload_complete() {
     while IFS=$'\t' read -r value description; do
         value=${value#"$trim"}
         COMPREPLY+=("$value")
-    done < <(command pload __complete "$last" "${tokens[@]}" 2>/dev/null)
+    done < <(command pload __complete --unquote "$last" "${tokens[@]}" 2>/dev/null)
 }
 complete -o filenames -F _pload_complete pload
 '''
@@ -318,7 +336,7 @@ _pload_complete() {
             candidates+=("$value")
             descriptions+=("$value -- $description")
         fi
-    done < <(command pload __complete "$((CURRENT - 1))" "${words[@]}" 2>/dev/null)
+    done < <(command pload __complete --unquote "$((CURRENT - 1))" "${words[@]}" 2>/dev/null)
     (( ${#directories} )) && compadd -S '' -- "${directories[@]}"
     (( ${#candidates} )) && compadd -d descriptions -- "${candidates[@]}"
     return 0

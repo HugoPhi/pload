@@ -155,6 +155,16 @@ def test_completion_protocol_never_prints_help(completion_home, capsys):
     assert capsys.readouterr().out == ""
 
 
+@pytest.mark.parametrize("prefix", ["my\\ project/ch", "'my project/ch", '"my project/ch'])
+def test_shell_quoted_paths_are_parsed_without_evaluation(
+    completion_home, tmp_path, monkeypatch, capsys, prefix,
+):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "my project" / "child folder").mkdir(parents=True)
+    assert main(["__complete", "--unquote", "3", "pload", "init", "-P", prefix]) == 0
+    assert "my project/child folder/\t" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("shell", ["bash", "zsh"])
 def test_registered_shell_completion_reads_live_candidates(completion_home, tmp_path, shell):
     executable = shutil.which(shell)
@@ -166,6 +176,8 @@ def test_registered_shell_completion_reads_live_candidates(completion_home, tmp_
     env["PATH"] = str(bin_dir) + os.pathsep + env["PATH"]
     env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1] / "src")
     env["ZDOTDIR"] = str(tmp_path)
+    env["PLOAD_COMPLETION_TEST_ROOT"] = str(tmp_path)
+    (tmp_path / "my project" / "child folder").mkdir(parents=True)
     if shell == "bash":
         script = r'''
 set -e
@@ -189,6 +201,10 @@ COMP_WORDS=(pload new --version = py)
 COMP_CWORD=4
 _pload_complete
 test "${COMPREPLY[0]}" = py2
+COMP_WORDS=(pload init -P "$PLOAD_COMPLETION_TEST_ROOT/my\\ project/ch")
+COMP_CWORD=3
+_pload_complete
+test "${COMPREPLY[0]}" = "$PLOAD_COMPLETION_TEST_ROOT/my project/child folder/"
 '''
     else:
         script = r'''
@@ -202,6 +218,9 @@ CURRENT=4
 _pload_complete
 words=(pload v)
 CURRENT=2
+_pload_complete
+words=(pload init -P "$PLOAD_COMPLETION_TEST_ROOT/my\\ project/ch")
+CURRENT=4
 _pload_complete
 '''
     result = subprocess.run(

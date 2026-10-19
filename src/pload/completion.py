@@ -121,7 +121,7 @@ def _values(action, prefix, values, config):
         head, _, fragment = prefix.rpartition(",")
         used = set(head.split(",")) if head else set()
         return [(f"{head}," + value if head else value, "Python source type")
-                for value in PythonManager.SOURCES
+                for value in (*PythonManager.SOURCES, *PythonManager.SOURCE_ALIASES)
                 if value not in used and value.startswith(fragment)]
     if action.choices:
         return [(str(value), action.help or "") for value in action.choices]
@@ -135,7 +135,7 @@ def _values(action, prefix, values, config):
     ):
         return _environments(config) + (_paths(prefix, directories=True) if prefix else [])
     if dest == "source":  # describe SOURCE
-        return _environments(config) + _pythons(config) + _paths(prefix)
+        return _environments(config) + _paths(prefix)
     if dest == "file":
         return _paths(prefix, toml=True)
     if dest in DIRECTORY_DESTS:
@@ -240,8 +240,10 @@ def candidates(parser, words, index):
         if isinstance(action, argparse._SubParsersAction):
             result = [(name, subparser.description or name)
                       for name, subparser in action.choices.items()]
-            if action.dest == "command":
+            if action.dest == "command" and index == 1:
                 result += _environments(config)
+                if "/" in prefix or "\\" in prefix or prefix.startswith("~"):
+                    result += _paths(prefix, directories=True)
         elif action:
             result = _values(action, prefix, values, config)
         else:

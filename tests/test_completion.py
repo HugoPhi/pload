@@ -89,7 +89,7 @@ def test_completion_uses_overridden_roots_and_is_read_only(completion_home, tmp_
         pytest.fail("completion must not execute tools, probe Python, or contact remote resources")
 
     monkeypatch.setattr(subprocess, "run", forbid)
-    assert "fresh" in complete("--venvs-dir", str(other), "fr")
+    assert "fresh" in complete("--venvs-dir", str(other), "rm", "fr")
     assert "v3" in complete("v")
     assert "py2" in complete("new", "-v", "py")
     after = {path: path.read_bytes() for path in completion_home.rglob("*") if path.is_file()}
@@ -127,6 +127,7 @@ def test_paths_with_spaces_and_config_files(completion_home, tmp_path, monkeypat
     (tmp_path / "my project" / "pload.toml").touch()
     (tmp_path / "plain.txt").touch()
     assert "my project/" in complete("init", "-P", "my")
+    assert "./my project/" in complete("./my")
     assert "my project/pload.toml" in complete("apply", "my project/")
     assert "plain.txt" not in complete("plan", "")
 

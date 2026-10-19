@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Print commands to enable activation in the current terminal after installation,
+  rather than requiring users to discover that their updated shell profile must
+  be loaded first.
+- Exercise create, activate, create-while-active, ID switching, and project-local
+  activation in persistent bash and zsh subprocesses using the real launcher.
+
 ## 1.2.0b1 - 2026-09-28
 
 Feature-complete beta for the declarative environment workflow.

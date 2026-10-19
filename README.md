@@ -247,7 +247,12 @@ environments. Configuration is stored in `PLOAD_HOME/config.json`.
 
 ## Shell activation
 
-The installer can update a shell profile. To configure it manually:
+The installer updates the selected shell profile for future terminals. In the
+terminal where you just installed pload, run the matching command below once;
+the installer also prints it. Environment activation is then available
+immediately, including for environments created afterward.
+
+To configure activation manually:
 
 ```bash
 # Bash

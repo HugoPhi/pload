@@ -57,7 +57,10 @@ def _paths(prefix, directories=False, toml=False):
 
 
 def _environments(config):
-    result = [(".", "activate project .venv")]
+    project_environment = Path.cwd() / ".venv"
+    result = [(".", "activate project .venv")] if (
+        not project_environment.is_symlink() and (project_environment / "pyvenv.cfg").is_file()
+    ) else []
     for item in _records(config.state_path / "environments.json", "environments"):
         path = Path(item.get("path", "")).expanduser()
         if not item.get("path") or path.is_symlink() or not (path / "pyvenv.cfg").is_file():
@@ -176,28 +179,8 @@ def _values(action, prefix, values, config):
     return []
 
 
-def _group_for_value(action, description):
-    if description in {"directory", "file", "configuration file"}:
-        return "Paths"
-    if description == "artifact repository":
-        return "Repositories"
-    if action.dest in {"python_version", "version"}:
-        return "Python"
-    if action.dest in {"names", "envs", "environment", "source", "name"}:
-        return "Environments"
-    if action.dest in {"requirements", "package"}:
-        return "Packages"
-    if action.dest == "sources":
-        return "Sources"
-    if action.dest in {"repository", "location"}:
-        return "Repositories"
-    if action.dest in DIRECTORY_DESTS | {"file", "output"}:
-        return "Paths"
-    return "Values"
-
-
-def candidates(parser, words, index, with_groups=False):
-    """Return suggestions at a zero-based shell word index, optionally with groups."""
+def candidates(parser, words, index):
+    """Return (value, description) suggestions at a zero-based shell word index."""
     if index < 1 or index > len(words):
         return []
     prefix = words[index] if index < len(words) else ""
@@ -257,44 +240,44 @@ def candidates(parser, words, index, with_groups=False):
             pending, attached, prefix = option, name + "=", value
 
     if pending is not None and (not prefix.startswith("-") or attached):
-        result = [(value, description, _group_for_value(pending, description))
-                  for value, description in _values(pending, prefix, values, config)]
+        result = _values(pending, prefix, values, config)
     elif prefix.startswith("-") and not options_done:
-        result = [(flag, action.help or "", "Options")
+        result = [(flag, action.help or "")
                   for flag, action in parser._option_string_actions.items()]
         if "-h" in words[:index] or "--help" in words[:index]:
-            result += [("-d", "detailed help with examples", "Options"),
-                       ("--detailed", "detailed help with examples", "Options")]
+            result += [("-d", "detailed help with examples"),
+                       ("--detailed", "detailed help with examples")]
     else:
         positional = [action for action in parser._actions if not action.option_strings]
         action = positional[position] if position < len(positional) else None
         if isinstance(action, argparse._SubParsersAction):
-            result = [(name, subparser.description or name, "Commands")
+            result = [(name, subparser.description or name)
                       for name, subparser in action.choices.items()]
+            if not prefix:
+                canonical = (COMMAND_NAMES if action.dest == "command"
+                             else PYTHON_COMMAND_NAMES if action.dest == "python_command" else {})
+                result = [(name, description) for name, description in result
+                          if not canonical or canonical.get(name) == name]
             if action.dest == "command" and index == 1:
-                result += [(value, description, "Environments")
-                           for value, description in _environments(config)]
+                environments = _environments(config)
+                if not prefix:
+                    environments = [(value, description) for value, description in environments
+                                    if value == "." or value.startswith("v") and value[1:].isdigit()]
+                result += environments
                 if "/" in prefix or "\\" in prefix or prefix.startswith("~"):
-                    result += [(value, description, "Paths")
-                               for value, description in _paths(prefix, directories=True)]
+                    result += _paths(prefix, directories=True)
         elif action:
-            result = [(value, description, _group_for_value(action, description))
-                      for value, description in _values(action, prefix, values, config)]
+            result = _values(action, prefix, values, config)
         else:
             result = []
-        if not prefix and not options_done:
-            result += [(flag, action.help or "", "Options")
-                       for flag, action in parser._option_string_actions.items()]
     unique = {}
-    for value, description, group in result:
+    for value, description in result:
         if not isinstance(value, str) or not value.startswith(prefix):
             continue
         if any(ord(char) < 32 or ord(char) == 127 for char in value):
             continue
-        unique[attached + value] = (" ".join(str(description).split())[:180], group)
-    if with_groups:
-        return [(value, description, group) for value, (description, group) in unique.items()]
-    return [(value, description) for value, (description, _) in unique.items()]
+        unique[attached + value] = " ".join(str(description).split())[:180]
+    return list(unique.items())
 
 
 def emit(parser, argv):
@@ -303,25 +286,10 @@ def emit(parser, argv):
         unquote = bool(argv and argv[0] == "--unquote")
         if unquote:
             argv = argv[1:]
-        grouped = bool(argv and argv[0] == "--groups")
-        if grouped:
-            argv = argv[1:]
         index = int(argv[0])
         words = [_unquote(word) for word in argv[1:]] if unquote else argv[1:]
-        rows = candidates(parser, words, index, with_groups=grouped)
-        if grouped:
-            from rich.cells import cell_len
-
-            widths = {}
-            for value, _, group in rows:
-                widths[group] = max(widths.get(group, 0), cell_len(value))
-            for value, description, group in rows:
-                dashes = "-" * (widths[group] - cell_len(value) + 3)
-                label = f"{value} {dashes} {description}"
-                print(f"{value}\t{description}\t{group}\t{label}")
-        else:
-            for row in rows:
-                print("\t".join(row))
+        for value, description in candidates(parser, words, index):
+            print(f"{value}\t{description}")
     except (OSError, ValueError, TypeError, IndexError):
         return 0
     return 0
@@ -377,48 +345,24 @@ complete -o filenames -F _pload_complete pload
     if shell == "zsh":
         return r'''
 _pload_complete() {
-    local value description group label i
-    local -a values groups labels order matches display expl
-    while IFS=$'\t' read -r value description group label; do
+    local value description
+    local -a matches directories
+    while IFS=$'\t' read -r value description; do
         [[ -z "$value" ]] && continue
-        values+=("$value")
-        groups+=("$group")
-        labels+=("$label")
-        (( ${order[(Ie)$group]} )) || order+=("$group")
-    done < <(command pload __complete --unquote --groups "$((CURRENT - 1))" "${words[@]}" 2>/dev/null)
-    for group in "${order[@]}"; do
-        _description -V "${(L)group}" expl "$group"
-        matches=()
-        display=()
-        for ((i=1; i<=${#values}; i++)); do
-            [[ "${groups[i]}" == "$group" && "${values[i]}" != */ ]] || continue
-            matches+=("${values[i]}")
-            display+=("${labels[i]}")
-        done
-        (( ${#matches} )) && compadd "${expl[@]}" -l -d display -- "${matches[@]}"
-        matches=()
-        display=()
-        for ((i=1; i<=${#values}; i++)); do
-            [[ "${groups[i]}" == "$group" && "${values[i]}" == */ ]] || continue
-            matches+=("${values[i]}")
-            display+=("${labels[i]}")
-        done
-        (( ${#matches} )) && compadd "${expl[@]}" -S '' -l -d display -- "${matches[@]}"
-    done
+        if [[ "$value" == */ ]]; then
+            directories+=("$value")
+        else
+            matches+=("$value")
+        fi
+    done < <(command pload __complete --unquote "$((CURRENT - 1))" "${words[@]}" 2>/dev/null)
+    (( ${#matches} )) && compadd -- "${matches[@]}"
+    (( ${#directories} )) && compadd -S '' -- "${directories[@]}"
     return 0
 }
 if ! (( $+functions[compdef] )); then
     autoload -Uz compinit
     compinit -i
 fi
-zmodload zsh/complist 2>/dev/null
-zstyle ':completion:*:*:pload:*' menu select=2
-if [[ -n "$NO_COLOR" ]]; then
-    zstyle ':completion:*:*:pload:*' format '› %d'
-else
-    zstyle ':completion:*:*:pload:*' format '%F{cyan}› %d%f'
-fi
-zstyle ':completion:*:*:pload:*' group-name ''
 compdef _pload_complete pload
 '''
     if shell == "fish":

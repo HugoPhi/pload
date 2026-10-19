@@ -6,9 +6,8 @@
   Fish, and PowerShell. Complete commands and aliases, options and fixed values,
   environment IDs/names, Python IDs/aliases, source filters, repositories, local
   package names, directories, and TOML paths using read-only local resources.
-- Group Zsh suggestions by purpose, show concise descriptions, and enable its
-  built-in arrow-key completion menu without adding another dependency. Align
-  descriptions in one column with dash separators.
+- Keep Zsh completion compact: show matching values without repeated group
+  headings or descriptions, and suggest options only after `-` is typed.
 - Fix shell dispatch for the `remote` command, so it is not treated as an
   environment name by the shell activation wrapper.
 - Explain missing shell integration when an environment name or ID reaches the

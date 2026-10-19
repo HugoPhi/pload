@@ -278,17 +278,16 @@ The same shell integration enables Tab completion for Bash, Zsh, Fish, and
 PowerShell. After upgrading, evaluate the matching command above once to refresh
 both activation and completion in the current terminal.
 
-In Zsh, the first Tab shows labeled groups such as Commands, Environments,
-Python, and Options. Descriptions start in the same column, separated from the
-choice by a dash-filled gap. Press Tab again to enter the selection menu; use the
-arrow keys and Enter to choose.
-This uses Zsh's built-in completion menu and requires no separate tool.
+Zsh completion shows only matching values in the shell's normal compact list.
+At `pload `, it suggests primary commands and available environment IDs;
+type part of an alias or environment name to find it. Options appear when you
+type `-`, such as `pload new -`. No separate completion tool is required.
 
 | Type, then press Tab | Suggested values |
 | --- | --- |
 | `pload v` | Existing environment IDs, such as `v1` and `v3` |
 | `pload data` | Matching environment names |
-| `pload py ` | `install`, `list` / `ls`, `path` / `p` |
+| `pload py ` | `install`, `list`, `path`; typing `l` or `p` also finds aliases |
 | `pload new -v py` | Python IDs, such as `py1` and `py2` |
 | `pload new -v uv-` | Installed Python aliases, such as `uv-v3.12.8` |
 | `pload py path ` | Python IDs, aliases, and installed versions |

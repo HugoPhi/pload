@@ -66,7 +66,7 @@ def _environments(config):
         description = str(item.get("description") or "")
         for key, label in (("id", name), ("name", identifier)):
             if item.get(key):
-                details = " · ".join(part for part in (label, description) if part)
+                details = " - ".join(part for part in (label, description) if part)
                 result.append((str(item[key]), details))
     if config.venv_path.is_dir():
         known = {value for value, _ in result}
@@ -82,11 +82,11 @@ def _pythons(config, install=False):
     for item in _records(config.state_path / "python-runtimes.json", "runtimes"):
         if not item.get("path") or not Path(item["path"]).is_file():
             continue
-        description = f"{item.get('source', 'Python')} · {item.get('version', '')}"
+        description = f"{item.get('source', 'Python')} {item.get('version', '')}".strip()
         keys = ("version",) if install else ("id", "alias", "version")
         for key in keys:
             if item.get(key):
-                label = f"{item['id']} · {description}" if key == "alias" and item.get("id") else description
+                label = f"{item['id']} / {description}" if key == "alias" and item.get("id") else description
                 result.append((item[key], label))
         version = str(item.get("version", ""))
         if version.count(".") >= 2:
@@ -308,8 +308,20 @@ def emit(parser, argv):
             argv = argv[1:]
         index = int(argv[0])
         words = [_unquote(word) for word in argv[1:]] if unquote else argv[1:]
-        for row in candidates(parser, words, index, with_groups=grouped):
-            print("\t".join(row))
+        rows = candidates(parser, words, index, with_groups=grouped)
+        if grouped:
+            from rich.cells import cell_len
+
+            widths = {}
+            for value, _, group in rows:
+                widths[group] = max(widths.get(group, 0), cell_len(value))
+            for value, description, group in rows:
+                dashes = "-" * (widths[group] - cell_len(value) + 3)
+                label = f"{value} {dashes} {description}"
+                print(f"{value}\t{description}\t{group}\t{label}")
+        else:
+            for row in rows:
+                print("\t".join(row))
     except (OSError, ValueError, TypeError, IndexError):
         return 0
     return 0
@@ -365,13 +377,13 @@ complete -o filenames -F _pload_complete pload
     if shell == "zsh":
         return r'''
 _pload_complete() {
-    local value description group i
-    local -a values descriptions groups order matches display expl
-    while IFS=$'\t' read -r value description group; do
+    local value description group label i
+    local -a values groups labels order matches display expl
+    while IFS=$'\t' read -r value description group label; do
         [[ -z "$value" ]] && continue
         values+=("$value")
-        descriptions+=("$description")
         groups+=("$group")
+        labels+=("$label")
         (( ${order[(Ie)$group]} )) || order+=("$group")
     done < <(command pload __complete --unquote --groups "$((CURRENT - 1))" "${words[@]}" 2>/dev/null)
     for group in "${order[@]}"; do
@@ -381,7 +393,7 @@ _pload_complete() {
         for ((i=1; i<=${#values}; i++)); do
             [[ "${groups[i]}" == "$group" && "${values[i]}" != */ ]] || continue
             matches+=("${values[i]}")
-            display+=("${values[i]}  ·  ${descriptions[i]}")
+            display+=("${labels[i]}")
         done
         (( ${#matches} )) && compadd "${expl[@]}" -l -d display -- "${matches[@]}"
         matches=()
@@ -389,7 +401,7 @@ _pload_complete() {
         for ((i=1; i<=${#values}; i++)); do
             [[ "${groups[i]}" == "$group" && "${values[i]}" == */ ]] || continue
             matches+=("${values[i]}")
-            display+=("${values[i]}  ·  ${descriptions[i]}")
+            display+=("${labels[i]}")
         done
         (( ${#matches} )) && compadd "${expl[@]}" -S '' -l -d display -- "${matches[@]}"
     done

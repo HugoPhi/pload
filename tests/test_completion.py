@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -156,13 +157,36 @@ def test_completion_protocol_never_prints_help(completion_home, capsys):
 
 
 def test_grouped_completion_keeps_inserted_values_separate_from_labels(completion_home, capsys):
-    assert complete("data")["data-tools"] == "v3 · Data analysis"
+    assert complete("data")["data-tools"] == "v3 - Data analysis"
     assert main(["__complete", "--groups", "1", "pload", "v"]) == 0
-    assert "v3\tdata-tools · Data analysis\tEnvironments\n" in capsys.readouterr().out
+    assert "v3\tdata-tools - Data analysis\tEnvironments\t" in capsys.readouterr().out
     assert main(["__complete", "--groups", "3", "pload", "new", "-v", "py"]) == 0
-    assert "py2\tuv · 3.12.8\tPython\n" in capsys.readouterr().out
+    assert "py2\tuv 3.12.8\tPython\t" in capsys.readouterr().out
     assert main(["__complete", "--groups", "2", "pload", "new", "--n"]) == 0
-    assert "--name\texact environment name\tOptions\n" in capsys.readouterr().out
+    assert "--name\texact environment name\tOptions\t" in capsys.readouterr().out
+
+
+def test_grouped_labels_align_wide_names(completion_home, capsys):
+    from rich.cells import cell_len
+
+    path = completion_home / "venvs" / "中文"
+    path.mkdir()
+    (path / "pyvenv.cfg").touch()
+    registry = completion_home / "state" / "environments.json"
+    data = json.loads(registry.read_text(encoding="utf-8"))
+    data["environments"].append({"id": "v4", "name": "中文", "path": str(path)})
+    registry.write_text(json.dumps(data), encoding="utf-8")
+    assert main(["__complete", "--groups", "1", "pload", ""]) == 0
+    rows = [line.split("\t") for line in capsys.readouterr().out.splitlines()]
+    environment_rows = [row for row in rows if row[2] == "Environments"]
+    assert {row[0] for row in environment_rows} >= {"v3", "v4", "中文"}
+    columns = []
+    for value, _, _, label in environment_rows:
+        assert label.startswith(value + " ")
+        connector = re.match(r"-+ ", label[len(value) + 1:])
+        assert connector is not None
+        columns.append(cell_len(value) + 1 + len(connector.group()))
+    assert len(set(columns)) == 1
 
 
 @pytest.mark.parametrize("prefix", ["my\\ project/ch", "'my project/ch", '"my project/ch'])
@@ -223,10 +247,18 @@ eval "$(command pload shell-init zsh)"
 test "${_comps[pload]}" = _pload_complete
 # Capture arguments passed to zsh's native completion engine.
 _description() { expl=(-V "$2" -X "$4"); }
-compadd() { print -rl -- "$@"; }
+compadd() {
+    print -rl -- "$@"
+    for text in "${display[@]}"; do print -r -- "DISPLAY:$text"; done
+}
 words=(pload new -v py)
 CURRENT=4
 _pload_complete
+print -r -- DISPLAY_START
+words=(pload new -v '')
+CURRENT=4
+_pload_complete
+print -r -- DISPLAY_END
 words=(pload v)
 CURRENT=2
 _pload_complete
@@ -241,6 +273,17 @@ _pload_complete
     assert result.returncode == 0, result.stdout + result.stderr
     assert "py2" in result.stdout.splitlines()
     assert "v3" in result.stdout.splitlines()
+    if shell == "zsh":
+        rendered = result.stdout.split("DISPLAY_START\n", 1)[1].split("DISPLAY_END\n", 1)[0]
+        labels = [line for line in rendered.splitlines() if line.startswith("DISPLAY:")]
+        assert len(labels) >= 2
+        columns = []
+        for line in labels:
+            match = re.fullmatch(r"DISPLAY:(\S+) (-+) (.+)", line)
+            assert match, line
+            assert "·" not in line
+            columns.append(len(match[1]) + len(match[2]) + 2)
+        assert len(set(columns)) == 1
 
 
 @pytest.mark.parametrize("shell", ["fish", "pwsh"])
